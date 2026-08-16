@@ -1,0 +1,37 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m7",
+    "extra_flags": "-DSTM32H7xx -DSTM32H723xx",
+    "f_cpu": "550000000L",
+    "framework_extra_flags": {
+      "arduino": "-DARDUINO_GENERIC_H723ZGTX"
+    },
+    "mcu": "stm32h723zgt6",
+    "product_line": "STM32H723xx",
+    "variant": "STM32H7xx/H723Z(E-G)T_H730ZBT_H733ZGT"
+  },
+  "debug": {
+    "jlink_device": "STM32H723ZG",
+    "openocd_target": "stm32h7x",
+    "svd_path": "STM32H723.svd"
+  },
+  "frameworks": [
+    "arduino",
+    "stm32cube"
+  ],
+  "name": "Generic STM32H723ZGT6",
+  "upload": {
+    "maximum_ram_size": 32780,
+    "maximum_size": 1048576,
+    "protocol": "stlink",
+    "protocols": [
+      "stlink",
+      "jlink",
+      "cmsis-dap",
+      "blackmagic"
+    ]
+  },
+  "url": "https://github.com/WeActStudio/WeActStudio.MiniSTM32H723",
+  "vendor": "Generic"
+}

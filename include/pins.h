@@ -1,0 +1,146 @@
+#pragma once
+
+// ============================================================================
+// T89 main node pin map — STM32H723ZGT6 (WeAct board)
+// ============================================================================
+// Nothing is built yet, so this is the document to argue with before any wire
+// is cut. Two hard constraints shaped it:
+//
+//  1. EXTI lines are per PIN NUMBER, not per port. PB4 and PA4 cannot both be
+//     interrupt inputs — they share EXTI4. Every interrupt-driven input below
+//     therefore has a distinct pin number (4,5,6,7,8,9 on port B; 0,1,2 on E).
+//
+//  2. Never call Arduino analogRead() in this project. It resolves a pin to the
+//     first ADC in the pinmap (ADC1 for most pins) and reconfigures it, which
+//     would tear down the continuous differential channel below. Analog reads
+//     go through clutch_adc.h, which owns ADC1 and ADC2 explicitly.
+// ============================================================================
+
+
+// ---------------------------------------------------------------------------
+// CAN — FDCAN1, 500 kbit/s classic, 29-bit extended IDs
+// ---------------------------------------------------------------------------
+// Same pins as stm32h723_transmitter_node, so the two nodes stay
+// interchangeable on the bench and the bring-up code ports verbatim.
+#define PIN_CAN_RX          PD0     // FDCAN1_RX, AF9
+#define PIN_CAN_TX          PD1     // FDCAN1_TX, AF9
+
+
+// ---------------------------------------------------------------------------
+// Clutch servo position feedback — ADC1 channel 10, DIFFERENTIAL
+// ---------------------------------------------------------------------------
+// This pair replaces the ADS1115. What made the ADS good was not its extra
+// bits, it was reading DIFFERENTIALLY against the servo's own ground, which
+// rejects the ground bounce that made the old single-ended GPIO15 read useless.
+// Keep that wiring intent or the noise comes straight back:
+//
+//   PC0 (INP) <- divided servo feedback  (0.591 divider, 4.7k/6.8k, 5V -> ~2.96V)
+//   PC1 (INN) <- the SERVO's ground return, run back as its own conductor,
+//                NOT a convenient board ground point. The whole benefit is
+//                measuring across the servo, not across the loom.
+//
+// Keep the existing divider: H723 analog inputs are not 5V tolerant.
+// ADC1 runs continuous at 16-bit with 64x hardware oversampling, so a read is
+// a register access that can never block — no bus, nothing to wedge.
+//
+// CONFIRM BEFORE WIRING: that PC0/PC1 carry ADC1_INP10/ADC1_INN10 on the
+// H723ZG package, from the datasheet pin-definition table. The INN of channel N
+// shares a pin with the INP of channel N+1, so an off-by-one here is silent and
+// only shows up as a dead reading. Only ADC_CH_CLUTCH below needs to change.
+#define PIN_CLUTCH_FB_P     PC0     // ADC1_INP10
+#define PIN_CLUTCH_FB_N     PC1     // ADC1_INN10  (also ADC1_INP11 — do not reuse)
+#define ADC_CH_CLUTCH       ADC_CHANNEL_10
+
+// ---------------------------------------------------------------------------
+// Clutch paddle hall sensors — ADC2, single-ended
+// ---------------------------------------------------------------------------
+// Two paddles, scaled and blended in firmware exactly as HallSensorControl.h
+// does today. On ADC2 so they can never disturb ADC1's differential channel.
+#define PIN_HALL_LEFT       PA2     // ADC12_INP14
+#define PIN_HALL_RIGHT      PA3     // ADC12_INP15
+#define ADC_CH_HALL_LEFT    ADC_CHANNEL_14
+#define ADC_CH_HALL_RIGHT   ADC_CHANNEL_15
+
+
+// ---------------------------------------------------------------------------
+// RPM — MAX9926 clean digital pulse into a hardware counter
+// ---------------------------------------------------------------------------
+// TIM2 in external-clock mode is the direct equivalent of the ESP32's PCNT:
+// the counter advances in hardware, the CPU only reads it. TIM2 is 32-bit, so
+// unlike PCNT's int16 there is no wrap to manage. The timer's input filter
+// (ICxF) replaces pcnt_set_filter_value(800) (~10 us).
+//
+// Keeping the MAX9926 for now — its adaptive peak threshold tracks a VR
+// amplitude that varies ~1000:1 across the rev range, which an internal
+// comparator on a fixed DAC threshold does badly.
+#define PIN_RPM_IN          PA0     // TIM2_CH1/ETR, AF1
+
+// ---------------------------------------------------------------------------
+// Clutch servo output
+// ---------------------------------------------------------------------------
+// Hardware PWM, so pulse width stays exact regardless of loop load. Shift
+// relays and ignition cut are NOT here — the rear node owns those and is
+// commanded over CAN (unchanged since v207).
+#define PIN_CLUTCH_SERVO    PA6     // TIM3_CH1, AF2
+
+// ---------------------------------------------------------------------------
+// 16x16 NeoMatrix (4x 8x8 WS2812 panels)
+// ---------------------------------------------------------------------------
+// TIM1_CH1 + DMA. 256 LEDs is ~7.7 ms of bitstream that costs the CPU nothing,
+// versus the ESP32's blocking show(). TIM1 is on APB2 with DMA burst support.
+#define PIN_MATRIX_DATA     PA8     // TIM1_CH1, AF1
+
+
+// ---------------------------------------------------------------------------
+// Inputs — all EXTI, all distinct pin numbers (see note 1 at top)
+// ---------------------------------------------------------------------------
+// The whole point of the migration: a paddle press raises an interrupt and is
+// timestamped immediately. It cannot be missed by a busy main loop, which is
+// exactly how presses were being lost on the ESP32's polled edge detect.
+// All active LOW with pull-ups.
+#define PIN_SHIFT_UP        PB4     // EXTI4
+#define PIN_SHIFT_DOWN      PB5     // EXTI5
+#define PIN_NEUTRAL         PB6     // EXTI6
+#define PIN_MANUAL_MODE     PB7     // EXTI7  — real toggle switch, not a long-press
+#define PIN_LOG_MARK        PB8     // EXTI8  — stamp a marker into the SD log
+#define PIN_ARM_SAFE        PB9     // EXTI9  — inhibit all shift output (pit safety)
+
+// Diagnostic encoder (KY-040). Driver lifts straight from
+// stm32h723_transmitter_node's encoder.cpp — only these three defines change.
+#define PIN_ENC_CLK         PE0     // EXTI0
+#define PIN_ENC_DT          PE1     // EXTI1
+#define PIN_ENC_SW          PE2     // EXTI2
+
+#define PIN_USER_BTN        PC13    // WeAct onboard button, active LOW
+
+
+// ---------------------------------------------------------------------------
+// Onboard 0.96" ST7735 status LCD (160x80) — fixed by the WeAct board
+// ---------------------------------------------------------------------------
+// Software SPI on its own pins, as in the transmitter node: at a few Hz of text
+// the bit-bang cost is negligible and it can never contend with another bus.
+// Diagnostics only — the rider reads the NeoMatrix, not this.
+#define PIN_LCD_BLK         PE10    // active low (P-FET switch)
+#define PIN_LCD_CS          PE11
+#define PIN_LCD_SCK         PE12
+#define PIN_LCD_DC          PE13
+#define PIN_LCD_MOSI        PE14    // panel RST tied to NRST
+
+
+// ---------------------------------------------------------------------------
+// SD logging — SDMMC1, 4-bit
+// ---------------------------------------------------------------------------
+// Fixed peripheral pins. Rule for later: writes go to a RAM ring and flush when
+// idle. Never touch the card inside a shift.
+#define PIN_SD_D0           PC8
+#define PIN_SD_D1           PC9
+#define PIN_SD_D2           PC10
+#define PIN_SD_D3           PC11
+#define PIN_SD_CK           PC12
+#define PIN_SD_CMD          PD2
+
+// ---------------------------------------------------------------------------
+// USB CDC — calibration link (see README: the web UI talks Web Serial)
+// ---------------------------------------------------------------------------
+#define PIN_USB_DM          PA11
+#define PIN_USB_DP          PA12
