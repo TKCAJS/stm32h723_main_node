@@ -50,6 +50,13 @@ bool can_init() {
     _hfdcan.Init.DataSyncJumpWidth    = 7;
     _hfdcan.Init.DataTimeSeg1         = 26;
     _hfdcan.Init.DataTimeSeg2         = 7;
+    // Message RAM, in 32-bit words, shared with FDCAN2 (the servo bus):
+    //   extended filters 2 x 2 =   4
+    //   Rx FIFO0        32 x 4 = 128   (2 header + 2 data words per 8-byte element)
+    //   Tx FIFO/queue    8 x 4 =  32
+    //                            ---
+    //                            164   -> CAN_MAIN_MSG_RAM_WORDS in can_main.h,
+    //                                    which is where FDCAN2 is told to start.
     _hfdcan.Init.MessageRAMOffset     = 0;
     _hfdcan.Init.StdFiltersNbr        = 0;
     _hfdcan.Init.ExtFiltersNbr        = 2;

@@ -10,6 +10,15 @@
 //
 // Nothing here blocks: TX queues into the hardware FIFO and returns, RX drains
 // whatever has arrived. There is no wait-for-ACK anywhere in the shift path.
+//
+// The clutch servo is NOT on this bus — it has its own controller, see
+// servo_can.h and the SERVO CAN section of pins.h.
+
+// FDCAN1 and FDCAN2 share one 10 KB message RAM. FDCAN1 sits at offset 0 and
+// occupies this many 32-bit words; FDCAN2 must start at or after it. The
+// arithmetic is spelled out beside the Init struct in can_main.cpp — if the
+// filter or FIFO element counts there change, this changes with them.
+#define CAN_MAIN_MSG_RAM_WORDS   164
 
 bool can_init();
 
