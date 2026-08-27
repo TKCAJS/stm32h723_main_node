@@ -36,9 +36,25 @@ must never leave 0.
 
 ## Never call `analogRead()`
 
-It resolves most pins to ADC1 and reconfigures it, which would tear down the
-free-running differential channel that replaced the ADS1115. All analog goes through
-`clutch_adc.h`, which owns ADC1 and ADC2 explicitly.
+It resolves most pins to ADC1 and reconfigures whatever it finds there. All analog
+goes through `hall_adc.h`, which owns ADC2 explicitly. The paddle halls are the only
+analog inputs left on the node.
+
+## The clutch servo is on its own CAN bus
+
+It is not PWM and its position is not a voltage. The servo (Wingxine ASMG-MD, native
+CAN) hangs off **FDCAN2**, separate from the bike bus on FDCAN1, and reports its
+position in counts. `clutch.h` is the only thing that should look at those counts;
+everything else asks it `clutch_disengaged()` / `clutch_just_engaged()`, which are
+the same two predicates the ESP32 node built out of `clutchVoltage`.
+
+There is no ADS1115, no divider, no feedback conductor and no `clutchVoltage`. If a
+port from the T89 repo reaches for one, it is reaching for the old I/O layer.
+
+`lib/asmg_servo/asmg_md_can.h` is shared verbatim with `esp32_T89Display_cansniff`,
+the tool the protocol was proven with — same rule as `can_ids.h`: correct it in one
+place and copy, never edit one copy in isolation. Items still marked `[VERIFY]` in it
+are bench questions, not settled facts.
 
 ## The pin map is a proposal until the board is built
 
@@ -52,6 +68,8 @@ confirming against the H723ZG datasheet and the WeAct schematic.
   state machine to be ported lives in `src/main_node/GearboxStateMachine.*`
 - `stm32h723_transmitter_node` — same board and framework; CAN bring-up, the status
   LCD driver and the KY-040 encoder driver were all lifted from it
+- `esp32_T89Display_cansniff` — the touchscreen sniffer that proved the ASMG-MD servo
+  protocol; `src/ServoBus.cpp` is the original of `src/servo_can.cpp` here
 - `P4Display_node` — the dash; its `PitServer` will host the calibration pages
 - `lib/can_ids/can_ids.h` is shared verbatim across all of them — it is the bus
   contract, so change it in one place and copy, never edit one copy in isolation

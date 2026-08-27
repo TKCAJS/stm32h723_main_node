@@ -11,14 +11,15 @@
 //     therefore has a distinct pin number (4,5,6,7,8,9 on port B; 0,1,2 on E).
 //
 //  2. Never call Arduino analogRead() in this project. It resolves a pin to the
-//     first ADC in the pinmap (ADC1 for most pins) and reconfigures it, which
-//     would tear down the continuous differential channel below. Analog reads
-//     go through clutch_adc.h, which owns ADC1 and ADC2 explicitly.
+//     first ADC in the pinmap (ADC1 for most pins) and reconfigures it out from
+//     under whatever else was using it. Analog reads go through hall_adc.h,
+//     which owns ADC2 explicitly. The paddle halls are the ONLY analog inputs
+//     left — clutch position now arrives over the servo CAN bus below.
 // ============================================================================
 
 
 // ---------------------------------------------------------------------------
-// CAN — FDCAN1, 500 kbit/s classic, 29-bit extended IDs
+// MAIN CAN bus — FDCAN1, 500 kbit/s classic, 29-bit extended IDs
 // ---------------------------------------------------------------------------
 // Same pins as stm32h723_transmitter_node, so the two nodes stay
 // interchangeable on the bench and the bring-up code ports verbatim.
@@ -27,35 +28,47 @@
 
 
 // ---------------------------------------------------------------------------
-// Clutch servo position feedback — ADC1 channel 10, DIFFERENTIAL
+// SERVO CAN bus — FDCAN2, 250 kbit/s classic, 29-bit extended IDs
 // ---------------------------------------------------------------------------
-// This pair replaces the ADS1115. What made the ADS good was not its extra
-// bits, it was reading DIFFERENTIALLY against the servo's own ground, which
-// rejects the ground bounce that made the old single-ended GPIO15 read useless.
-// Keep that wiring intent or the noise comes straight back:
+// The clutch servo (Wingxine ASMG-MD, native-CAN "ZDY" variant) is commanded
+// and read over its own bus. It gets a SECOND controller, not a second address
+// on the main bus, for three reasons:
 //
-//   PC0 (INP) <- divided servo feedback  (0.591 divider, 4.7k/6.8k, 5V -> ~2.96V)
-//   PC1 (INN) <- the SERVO's ground return, run back as its own conductor,
-//                NOT a convenient board ground point. The whole benefit is
-//                measuring across the servo, not across the loom.
+//   1. Rate. Clutch telemetry is polled request/reply at 50 Hz — every poll is
+//      two frames. On the main bus that traffic would sit underneath the shift
+//      commands and gear reports, for no benefit to any other node.
+//   2. Bit rate. The servo ships at 250 kbit/s; the bike bus is 500 kbit/s and
+//      is not being re-rated to suit one actuator.
+//   3. Blast radius. The servo's arbitration IDs are the manufacturer's
+//      (0x18EF0201, J1939-shaped) and sit outside our can_ids.h scheme
+//      entirely. A confused servo cannot talk over a gear report it can't see.
 //
-// Keep the existing divider: H723 analog inputs are not 5V tolerant.
-// ADC1 runs continuous at 16-bit with 64x hardware oversampling, so a read is
-// a register access that can never block — no bus, nothing to wedge.
+// FDCAN2_RX/TX are only offered on PB5/PB6 or PB12/PB13. PB5 and PB6 are
+// paddle EXTI inputs, so PB12/PB13 it is — neither is an interrupt input, so
+// no EXTI line is consumed.
+#define PIN_SERVO_CAN_RX    PB12    // FDCAN2_RX, AF9
+#define PIN_SERVO_CAN_TX    PB13    // FDCAN2_TX, AF9
+
+// ---------------------------------------------------------------------------
+// Freed by the servo CAN migration — do not silently reuse
+// ---------------------------------------------------------------------------
+// PC0 / PC1 carried the ADS1115-replacement differential feedback pair, and PA6
+// carried the servo's PWM. Both paths are gone: the servo reports its own
+// position in counts over CAN and is commanded the same way, so there is no
+// analog feedback to divide, no ground return to run back, and no pulse to
+// keep exact. The divider, the feedback conductor and the PWM line all come out
+// of the loom.
 //
-// CONFIRM BEFORE WIRING: that PC0/PC1 carry ADC1_INP10/ADC1_INN10 on the
-// H723ZG package, from the datasheet pin-definition table. The INN of channel N
-// shares a pin with the INP of channel N+1, so an off-by-one here is silent and
-// only shows up as a dead reading. Only ADC_CH_CLUTCH below needs to change.
-#define PIN_CLUTCH_FB_P     PC0     // ADC1_INP10
-#define PIN_CLUTCH_FB_N     PC1     // ADC1_INN10  (also ADC1_INP11 — do not reuse)
-#define ADC_CH_CLUTCH       ADC_CHANNEL_10
+// Left unassigned deliberately. PC0/PC1 are the only ADC1 differential pair
+// brought out on this board, so they are worth keeping free for a future
+// differential sensor rather than spending on a spare GPIO.
 
 // ---------------------------------------------------------------------------
 // Clutch paddle hall sensors — ADC2, single-ended
 // ---------------------------------------------------------------------------
 // Two paddles, scaled and blended in firmware exactly as HallSensorControl.h
-// does today. On ADC2 so they can never disturb ADC1's differential channel.
+// does today. The only analog inputs left on the node. Kept on ADC2 rather
+// than ADC1 so that PC0/PC1's differential pair stays available untouched.
 #define PIN_HALL_LEFT       PA2     // ADC12_INP14
 #define PIN_HALL_RIGHT      PA3     // ADC12_INP15
 #define ADC_CH_HALL_LEFT    ADC_CHANNEL_14
@@ -74,14 +87,6 @@
 // amplitude that varies ~1000:1 across the rev range, which an internal
 // comparator on a fixed DAC threshold does badly.
 #define PIN_RPM_IN          PA0     // TIM2_CH1/ETR, AF1
-
-// ---------------------------------------------------------------------------
-// Clutch servo output
-// ---------------------------------------------------------------------------
-// Hardware PWM, so pulse width stays exact regardless of loop load. Shift
-// relays and ignition cut are NOT here — the rear node owns those and is
-// commanded over CAN (unchanged since v207).
-#define PIN_CLUTCH_SERVO    PA6     // TIM3_CH1, AF2
 
 // ---------------------------------------------------------------------------
 // 16x16 NeoMatrix (4x 8x8 WS2812 panels)
@@ -140,7 +145,7 @@
 #define PIN_SD_CMD          PD2
 
 // ---------------------------------------------------------------------------
-// USB CDC — calibration link (see README: the web UI talks Web Serial)
+// USB CDC — calibration link (see README; the console also runs on a UART)
 // ---------------------------------------------------------------------------
 #define PIN_USB_DM          PA11
 #define PIN_USB_DP          PA12

@@ -1,12 +1,15 @@
 // T89 main node — STM32H723ZGT6. Bring-up scaffold.
 //
 // What this is: the hardware layer, proving the pin map on the bench. Inputs,
-// CAN to the rear node, clutch feedback, and a diagnostic readout.
+// CAN to the rear node, CAN to the clutch servo, and a diagnostic readout.
 //
 // What this is NOT yet: the gearbox state machine. That is a deliberate port
 // from src/main_node/GearboxStateMachine.* in the T89 repo and wants its own
 // review — the logic is sound and hard-won, it is only the I/O underneath it
-// that is being replaced.
+// that is being replaced. The clutch half of that I/O is now done: what was
+// PWM out and an ADS1115 voltage in is a servo on its own CAN bus, commanded
+// and read in counts (clutch.h). The state machine's two clutch predicates
+// survive verbatim in meaning — clutch_disengaged() and clutch_just_engaged().
 //
 // The rule this node exists to enforce: nothing in loop() may block. No bus
 // wait, no delay(), no retry loop. Paddles arrive by interrupt and are already
@@ -17,18 +20,21 @@
 #include "pins.h"
 #include "inputs.h"
 #include "can_main.h"
-#include "clutch_adc.h"
+#include "servo_can.h"
+#include "clutch.h"
+#include "hall_adc.h"
 #include "status_lcd.h"
+#include "serial_cli.h"
+#include "node_status.h"
 #include "can_ids.h"
-
-// Clutch thresholds, in volts at the ADC pin. Placeholders until captured live
-// through the calibration UI, exactly as on the ESP32 node: the numbers are
-// meaningless in the abstract, only their position relative to the travel is.
-static float _clutchDisengageV = 1.8f;
 
 // Loop-time watchdog, carried over from the ESP32 node's v214 fix. There the
 // number was the evidence that a blocking I2C read was eating shift commands.
 // Here it should sit in the low hundreds of microseconds and stay there.
+//
+// One legitimate exception: `cal save` erases a flash sector and stalls the
+// core for the best part of a second. It is reachable only while ARM/SAFE
+// reads SAFE, and it will leave a mark here — that mark is expected.
 static uint32_t _maxLoopUs  = 0;
 static uint32_t _loopStalls = 0;
 #define LOOP_STALL_US 20000
@@ -86,15 +92,31 @@ void setup() {
     inputs_init();
     _armed = !inputs_level(INPUT_ARM_SAFE);
 
-    if (!clutch_adc_init()) {
+    if (!hall_adc_init()) {
         status_lcd_banner("ADC FAIL", false);
-        while (true) delay(1000);      // no clutch feedback, no safe shifting
+        while (true) delay(1000);      // no paddle position, no clutch control
     }
 
     if (!can_init()) {
         status_lcd_banner("CAN FAIL", false);
         while (true) delay(1000);
     }
+
+    // The servo bus. A failure here is fatal for the same reason the ADS1115
+    // was: without it there is no clutch position and no way to move the
+    // clutch, so there is no safe shifting either.
+    if (!servo_can_init()) {
+        status_lcd_banner("SERVO CAN FAIL", false);
+        while (true) delay(1000);
+    }
+
+    // Calibration comes from flash when it is there and valid. When it is not,
+    // the factory travel stands in — deliberately not a fault: an uncalibrated
+    // node still has to boot and be driveable to the point where it can be
+    // calibrated over the console.
+    clutch_init();
+
+    serial_cli_init();
 
     status_lcd_banner("READY", true);
 }
@@ -109,33 +131,52 @@ void loop() {
 
     can_poll();
 
-    // Free-running ADC: a register read, never a wait.
-    float clutchV = clutch_adc_volts();
+    // Servo bus: drain replies, retire a dead request, send what is due. Like
+    // can_poll() it only ever moves what has already arrived.
+    servo_can_poll();
 
     // TODO: rpm from the TIM2 hardware counter (PA0), once wired.
     uint16_t rpm = 0;
     can_tick(rpm, _manualMode);
 
     StatusInfo s = {};
-    s.gear             = can_gear();
-    s.gearValid        = can_gear_valid();
-    s.rpm              = rpm;
-    s.armed            = _armed;
-    s.manualMode       = _manualMode;
-    s.clutchVolts      = clutchV;
-    s.clutchDisengaged = (clutchV < _clutchDisengageV);
-    s.hallLeft         = hall_read_left();
-    s.hallRight        = hall_read_right();
-    s.canRxCount       = can_rx_count();
-    s.canGearAgeMs     = can_gear_age_ms();
-    s.canLive          = can_bus_live();
-    s.maxLoopUs        = _maxLoopUs;
-    s.inputsDropped    = inputs_dropped();
-    s.shiftUpCount     = _upCount;
-    s.shiftDownCount   = _downCount;
-    s.neutralCount     = _neutralCount;
-    s.markCount        = _markCount;
+    s.gear              = can_gear();
+    s.gearValid         = can_gear_valid();
+    s.rpm               = rpm;
+    s.armed             = _armed;
+    s.manualMode        = _manualMode;
+
+    // The clutch line, in servo counts. Reading it is now two register-free
+    // accessor calls over state the servo bus already delivered — no ADC, no
+    // divider, and a "stale" that means what it says.
+    s.clutchCounts      = clutch_position();
+    s.clutchFeedbackOk  = clutch_feedback_ok();
+    s.clutchDisengaged  = clutch_disengaged();
+    s.clutchJustEngaged = clutch_just_engaged();
+    s.clutchCommanded   = clutch_commanded();
+
+    s.hallLeft          = hall_read_left();
+    s.hallRight         = hall_read_right();
+
+    s.canRxCount        = can_rx_count();
+    s.canGearAgeMs      = can_gear_age_ms();
+    s.canLive           = can_bus_live();
+
+    const ServoStatus *sv = servo_status();
+    s.servoRxCount      = sv->rxCount;
+    s.servoTimeouts     = sv->timeouts;
+    s.servoLatUs        = sv->latLastUs;
+    s.servoBusOff       = sv->busOff;
+
+    s.maxLoopUs         = _maxLoopUs;
+    s.inputsDropped     = inputs_dropped();
+    s.shiftUpCount      = _upCount;
+    s.shiftDownCount    = _downCount;
+    s.neutralCount      = _neutralCount;
+    s.markCount         = _markCount;
+
     status_lcd_tick(&s);
+    serial_cli_tick(&s);
 
     const uint32_t loopUs = micros() - loopStartUs;
     if (loopUs > _maxLoopUs)   _maxLoopUs = loopUs;
