@@ -151,6 +151,10 @@
 // Software SPI on its own pins, as in the transmitter node: at a few Hz of text
 // the bit-bang cost is negligible and it can never contend with another bus.
 // Diagnostics only — the rider reads the NeoMatrix, not this.
+//
+// SETTLED. These are not a proposal: the same five pins drive the same panel on
+// stm32h723_transmitter_node, on this same board, and that display works. The
+// driver here was lifted from it. Nothing to check against a schematic.
 #define PIN_LCD_BLK         PE10    // active low (P-FET switch)
 #define PIN_LCD_CS          PE11
 #define PIN_LCD_SCK         PE12
@@ -161,8 +165,16 @@
 // ---------------------------------------------------------------------------
 // SD logging — SDMMC1, 4-bit
 // ---------------------------------------------------------------------------
-// Fixed peripheral pins. Rule for later: writes go to a RAM ring and flush when
-// idle. Never touch the card inside a shift.
+// Fixed peripheral pins — SDMMC1 has little choice about where it lands, and
+// this set is confirmed valid for the peripheral in the core's PeripheralPins.c
+// for this variant.
+//
+// Expected correct, but UNEXERCISED: there is no SD driver in this repo yet, so
+// unlike the LCD above nothing has ever driven these pins. Treat the first card
+// mount as the test, not as a formality.
+//
+// Rule for later: writes go to a RAM ring and flush when idle. Never touch the
+// card inside a shift.
 #define PIN_SD_D0           PC8
 #define PIN_SD_D1           PC9
 #define PIN_SD_D2           PC10

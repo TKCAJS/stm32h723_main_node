@@ -117,14 +117,20 @@ The package-level questions are now answered — every peripheral assignment has
 checked against `PeripheralPins.c` for this exact variant in the Arduino core, which
 is generated from ST's package data. See the table at the end of `GPIO_MAP.md`.
 
-What is left needs a board or a meter, not a datasheet:
+The **LCD pins are settled** — the same five drive the same panel on
+`stm32h723_transmitter_node`, on this same board, and that display works. The **SD set
+is expected correct** (SDMMC1 has little choice about where it lands, and the pins
+check out for the peripheral), but no SD driver exists here yet, so nothing has ever
+driven them: the first card mount is the test.
 
-- SDMMC1 and the onboard LCD pins against the **WeAct schematic**. The silicon is
-  settled; how this particular board wires it is not.
+What genuinely remains is wiring, not pin choice:
+
 - The servo bus needs its own transceiver and its own 120 Ω termination pair. It is a
   second bus, not a stub off the first.
 - USB is data-only: the node is bike-powered, so nothing should draw from the host's
   VBUS or feed back into it.
+- The `[VERIFY]` items in `asmg_md_can.h` — reply arbitration ID and 16-bit word order
+  — are bench questions the console settles on the real node, not desk work.
 
 ## State
 
