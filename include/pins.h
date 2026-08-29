@@ -86,6 +86,11 @@
 // Keeping the MAX9926 for now — its adaptive peak threshold tracks a VR
 // amplitude that varies ~1000:1 across the rev range, which an internal
 // comparator on a fixed DAC threshold does badly.
+//
+// PA0 is also the generic H723ZG variant's default UART4 TX for `Serial`. That
+// is why the console is built onto USB CDC rather than left on the UART — on
+// the UART the two would be fighting over this pin, and the loser would be the
+// one you notice least: an RPM reading that is quietly wrong.
 #define PIN_RPM_IN          PA0     // TIM2_CH1/ETR, AF1
 
 // ---------------------------------------------------------------------------
@@ -93,6 +98,11 @@
 // ---------------------------------------------------------------------------
 // TIM1_CH1 + DMA. 256 LEDs is ~7.7 ms of bitstream that costs the CPU nothing,
 // versus the ESP32's blocking show(). TIM1 is on APB2 with DMA burst support.
+//
+// CONFLICT TO HONOUR: with USB CDC enabled (see platformio.ini) the USB device
+// stack configures every pin in the OTG_HS pin map, and PA8 is in it as
+// USB_OTG_HS_SOF. SOF is not needed for CDC, so the fix is ordering, not a pin
+// move: initialise the matrix AFTER Serial.begin() and it takes PA8 back.
 #define PIN_MATRIX_DATA     PA8     // TIM1_CH1, AF1
 
 
@@ -145,7 +155,15 @@
 #define PIN_SD_CMD          PD2
 
 // ---------------------------------------------------------------------------
-// USB CDC — calibration link (see README; the console also runs on a UART)
+// USB CDC — the serial console (serial_cli.cpp)
 // ---------------------------------------------------------------------------
+// H72x/H73x has no OTG_FS; the single USB peripheral is OTG_HS driven from its
+// internal full-speed PHY, which is what puts D-/D+ on PA11/PA12. Enabled by
+// the four USB flags in platformio.ini, which also reserve PA9 (VBUS) and
+// PA10 (ID) — leave both free.
+//
+// The node is powered by the bike, so nothing here should draw from the host's
+// VBUS or feed back into it. VBUS sensing is off by default in this core, so a
+// data-only connection is the intended wiring.
 #define PIN_USB_DM          PA11
 #define PIN_USB_DP          PA12
