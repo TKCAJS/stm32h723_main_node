@@ -62,6 +62,8 @@
 // Left unassigned deliberately. PC0/PC1 are the only ADC1 differential pair
 // brought out on this board, so they are worth keeping free for a future
 // differential sensor rather than spending on a spare GPIO.
+//
+// PA8 joins them: freed when the NeoMatrix moved to PC6 to get clear of USB.
 
 // ---------------------------------------------------------------------------
 // Clutch paddle hall sensors — ADC2, single-ended
@@ -87,23 +89,35 @@
 // amplitude that varies ~1000:1 across the rev range, which an internal
 // comparator on a fixed DAC threshold does badly.
 //
-// PA0 is also the generic H723ZG variant's default UART4 TX for `Serial`. That
-// is why the console is built onto USB CDC rather than left on the UART — on
-// the UART the two would be fighting over this pin, and the loser would be the
-// one you notice least: an RPM reading that is quietly wrong.
+// PA0 is ALSO the generic H723ZG variant's default UART4 TX for `Serial`. The
+// console is on USB CDC so nothing contends for it today, but a build with USB
+// turned off would silently put a UART back on this pin, and the symptom would
+// be the one you notice least: an RPM reading that is quietly wrong. The
+// fallback UART is therefore pinned to PD5/PD6 in platformio.ini rather than
+// left on the variant default. Confirmed TIM2_CH1 on PA0 from the core's
+// PeripheralPins.c for this variant.
 #define PIN_RPM_IN          PA0     // TIM2_CH1/ETR, AF1
 
 // ---------------------------------------------------------------------------
 // 16x16 NeoMatrix (4x 8x8 WS2812 panels)
 // ---------------------------------------------------------------------------
-// TIM1_CH1 + DMA. 256 LEDs is ~7.7 ms of bitstream that costs the CPU nothing,
-// versus the ESP32's blocking show(). TIM1 is on APB2 with DMA burst support.
+// TIM8_CH1 + DMA. 256 LEDs is ~7.7 ms of bitstream that costs the CPU nothing,
+// versus the ESP32's blocking show(). TIM8 is on APB2 with DMA burst support.
 //
-// CONFLICT TO HONOUR: with USB CDC enabled (see platformio.ini) the USB device
-// stack configures every pin in the OTG_HS pin map, and PA8 is in it as
-// USB_OTG_HS_SOF. SOF is not needed for CDC, so the fix is ordering, not a pin
-// move: initialise the matrix AFTER Serial.begin() and it takes PA8 back.
-#define PIN_MATRIX_DATA     PA8     // TIM1_CH1, AF1
+// This was PA8 / TIM1_CH1, which does not survive USB being enabled: the USB
+// device stack configures EVERY pin in the OTG_HS map, and PA8 is in it as
+// USB_OTG_HS_SOF. That was workable — SOF is not needed for CDC, so claiming
+// PA8 back after Serial.begin() would have held — but it left a rule that only
+// bites the person who writes the matrix driver, months from now, with a
+// symptom (dead matrix) that points nowhere near USB.
+//
+// Nothing is soldered, so the trap is not worth keeping. PC6 has no such
+// caveat: TIM8's complementary outputs land on PA5/PA7, both free, so there is
+// no "as long as nobody enables it" attached to this choice either.
+//
+// PC6 is also SDMMC1_D6, which only matters in 8-bit mode. The SD block below
+// is 4-bit.
+#define PIN_MATRIX_DATA     PC6     // TIM8_CH1, AF3
 
 
 // ---------------------------------------------------------------------------
@@ -113,6 +127,8 @@
 // timestamped immediately. It cannot be missed by a busy main loop, which is
 // exactly how presses were being lost on the ESP32's polled edge detect.
 // All active LOW with pull-ups.
+// PB4 is NJTRST at reset. Harmless here: SWD (PA13/PA14) is what the ST-Link
+// uses, and NJTRST's reset pull-up matches an active-LOW input anyway.
 #define PIN_SHIFT_UP        PB4     // EXTI4
 #define PIN_SHIFT_DOWN      PB5     // EXTI5
 #define PIN_NEUTRAL         PB6     // EXTI6
@@ -165,5 +181,13 @@
 // The node is powered by the bike, so nothing here should draw from the host's
 // VBUS or feed back into it. VBUS sensing is off by default in this core, so a
 // data-only connection is the intended wiring.
+//
+// Fallback console, for a build with USB disabled: USART2 on PD5/PD6, pinned
+// in platformio.ini. The variant would otherwise default to UART4 on PA0/PA1
+// and put a UART on the RPM counter's pin. Both are otherwise unused, so this
+// costs nothing and gives bring-up a second port that does not depend on USB
+// enumerating at all.
+#define PIN_SERIAL_FALLBACK_TX  PD5     // USART2_TX, AF7
+#define PIN_SERIAL_FALLBACK_RX  PD6     // USART2_RX, AF7
 #define PIN_USB_DM          PA11
 #define PIN_USB_DP          PA12

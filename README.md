@@ -35,6 +35,7 @@ Full detail and rationale in `include/pins.h`. Summary:
 | FDCAN2 — servo bus | **PB12 RX / PB13 TX** | clutch servo only, 250k classic |
 | Paddle halls | PA2 / PA3 | ADC2, single-ended — the only analog left |
 | RPM | PA0 | TIM2 external clock — the PCNT equivalent, 32-bit |
+| NeoMatrix | **PC6** | TIM8_CH1 + DMA — moved off PA8, which USB claims |
 | NeoMatrix | PA8 | TIM1_CH1 + DMA |
 | Paddles/switches | PB4–PB9 | EXTI, distinct pin numbers, active LOW |
 | Encoder | PE0/PE1/PE2 | KY-040, driver lifts from the transmitter node |
@@ -112,12 +113,18 @@ is numerically larger defines "toward disengaged" for every threshold test.
 
 ## Confirm before wiring
 
-- **PB12/PB13 = FDCAN2_RX/FDCAN2_TX** on the H723ZG package. The only other option is
-  PB5/PB6, which are paddle EXTI inputs — so if this is wrong, two paddles move.
-- PA2/PA3 as ADC12_INP14/INP15, from the datasheet pin table.
-- SDMMC1 and the onboard LCD pins against the WeAct board schematic.
+The package-level questions are now answered — every peripheral assignment has been
+checked against `PeripheralPins.c` for this exact variant in the Arduino core, which
+is generated from ST's package data. See the table at the end of `GPIO_MAP.md`.
+
+What is left needs a board or a meter, not a datasheet:
+
+- SDMMC1 and the onboard LCD pins against the **WeAct schematic**. The silicon is
+  settled; how this particular board wires it is not.
 - The servo bus needs its own transceiver and its own 120 Ω termination pair. It is a
   second bus, not a stub off the first.
+- USB is data-only: the node is bike-powered, so nothing should draw from the host's
+  VBUS or feed back into it.
 
 ## State
 
