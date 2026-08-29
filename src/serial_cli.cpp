@@ -25,6 +25,7 @@ static uint32_t _outDropped = 0;
 
 static char    _line[LINE_MAX];
 static uint8_t _lineLen = 0;
+static bool    _lastWasCR = false;
 
 static const StatusInfo *_s = NULL;
 
@@ -79,7 +80,13 @@ static void _drain() {
         int n = (int)contiguous;
         if (n > room)    n = room;
         if (n > budget)  n = budget;
+        // Never hand it more than it just said it could take: USBSerial::write()
+        // spins until everything is enqueued, and staying inside
+        // availableForWrite() is what keeps that loop from being a wait.
         Serial.write((const uint8_t *)&_out[_outTail], (size_t)n);
+        // Advance regardless of the return. With no host attached, CDC discards
+        // and returns 0 — dropping that output is right. Retrying it would fill
+        // the ring with history that dumps in a burst at the next plug-in.
         _outTail = (uint16_t)((_outTail + n) & OUT_MASK);
         room   -= n;
         budget -= n;
@@ -406,8 +413,14 @@ void serial_cli_tick(const StatusInfo *s) {
     // Input, bounded. A host pasting a script cannot hold the loop open.
     for (int i = 0; i < RX_PER_PASS && Serial.available() > 0; i++) {
         int c = Serial.read();
-        if (c < 0 || c == '\r') continue;
-        if (c == '\n') {
+        if (c < 0) continue;
+
+        // CR, LF or CRLF all end a line. Terminal apps disagree about this and
+        // the Android ones commonly send CR alone, so accepting only LF would
+        // look exactly like a dead link: you type, and nothing ever runs.
+        if (c == '\r' || c == '\n') {
+            if (c == '\n' && _lastWasCR) { _lastWasCR = false; continue; }  // CRLF: one line, not two
+            _lastWasCR = (c == '\r');
             _line[_lineLen] = '\0';
             _emit("\r\n", 2);
             if (_lineLen) {
@@ -417,6 +430,7 @@ void serial_cli_tick(const StatusInfo *s) {
             _lineLen = 0;
             continue;
         }
+        _lastWasCR = false;
         if (c == 8 || c == 127) { if (_lineLen) { _lineLen--; _emit("\b \b", 3); } continue; }
         if (c >= ' ' && _lineLen < LINE_MAX - 1) {
             _line[_lineLen++] = (char)c;

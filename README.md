@@ -165,15 +165,37 @@ Two rules for that channel:
 **Secondary path — laptop on the bench.** The same page over Web Serial on USB CDC, no
 dash involved. Convenient for deep bring-up work, but it is the desktop-only path.
 
+**Plugging an Android device straight into this node** works, but not through a
+browser — there is no Web Serial on Android to reach the port with. Phone in USB host
+mode (OTG), node as the CDC device, and either:
+
+- **a terminal app** (e.g. Kai Morich's *Serial USB Terminal*), 115200 8N1, **local
+  echo off** — the node echoes. Every command above, nothing to write. This is the
+  bench answer;
+- **a small native app** — `usb-serial-for-android` for the port, a WebView loading the
+  calibration page out of assets, bridged with `addJavascriptInterface`. That is the
+  only way to get the *page* onto an Android screen over USB, and it is an app to
+  write, not a URL to open.
+
+Either way the node is bike-powered, so the connection is data-only: nothing should
+draw from the phone's VBUS or feed back into it. VBUS sensing is off in this build,
+which is what makes that wiring legal.
+
+For the pit lane the dash path above is still the answer. USB to a handset is a bench
+convenience, not a trackside plan — it needs a cable, a dongle and a spare hand.
+
 **Always available, and now built.** A plain text command set on the serial port —
 `src/serial_cli.cpp`. This is the web interface's replacement, not a stopgap: there is
 no server on this node and there never will be, so every knob `WebInterface.h` had is
 here, plus the sniffer's bench controls, because settling the servo protocol has to
 stay repeatable on the real node.
 
-`Serial` is whichever port the build maps it to — the variant's UART today; add
-`-DUSBCON -DUSBD_USE_CDC` to `build_flags` to move it to USB CDC on PA11/PA12. The
-console does not care which, and does not block on either: input is drained a bounded
+`Serial` is USB CDC on PA11/PA12, set by four flags in `platformio.ini`. Not a
+preference: the generic H723ZG variant defaults `Serial` to UART4 on **PA0**, which is
+`PIN_RPM_IN`. H72x/H73x has no OTG_FS, so the peripheral is OTG_HS on its internal FS
+PHY (`USE_USB_HS` + `USE_USB_HS_IN_FS`). The 48 MHz clock needs no work — the
+variant's `SystemClock_Config` already enables HSI48, selects it for USB and trims it
+with CRS. The console does not block: input is drained a bounded
 number of bytes per pass, output goes into a ring emptied only as fast as the port
 will take it without waiting. Under pressure it drops **whole lines** and counts them
 — a half-written line is worse than a missing one, and a console is never allowed to
