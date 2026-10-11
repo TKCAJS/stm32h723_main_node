@@ -79,6 +79,20 @@
   #links line { stroke: var(--zone); stroke-width: 2; stroke-dasharray: 6 4; opacity: .9; }
 
   #testSlider { width: 100%; }
+
+  /* ---- response curve graph ---- */
+  #curveSvg { width: 100%; max-width: 640px; height: auto; display: block; background: #000; border-radius: 6px; }
+  #curveSvg text { fill: var(--dim); font-size: 11px; }
+  #curveSvg .grid { stroke: #2a2a2a; stroke-width: 1; }
+  #curveSvg .axis { stroke: #555; stroke-width: 1; }
+  #curveLine { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+  #curveZone { fill: rgba(76,175,80,.18); stroke: rgba(76,175,80,.6); stroke-width: 1; }
+  #curveSvg .mark { stroke-dasharray: 5 4; stroke-width: 1.5; }
+  #curveBite { stroke: var(--warn); } #curveTrig { stroke: var(--bad); }
+  #curveDot { fill: var(--puck); stroke: #000; stroke-width: 1.5; }
+  .curve-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .curve-controls label { color: var(--dim); font-size: 13px; }
+  .curve-controls input { width: 110px; }
 </style>
 </head>
 <body>
@@ -94,7 +108,7 @@
 
 <div class="tabs">
   <button id="tabSettings" class="on">Settings</button>
-  <button id="tabPw">Piecewise</button>
+  <button id="tabPw">Curve &amp; piecewise</button>
 </div>
 
 <div id="pageSettings">
@@ -109,6 +123,31 @@
 </div>
 
 <div id="pagePw" hidden>
+  <section>
+    <h2>Paddle to clutch response</h2>
+    <div class="curve-controls">
+      <label for="curveSel">Curve</label>
+      <select class="needs-link" id="curveSel" disabled></select>
+      <label for="strengthBox">Strength &times;100</label>
+      <input type="number" inputmode="numeric" class="needs-link" id="strengthBox" min="10" max="500" disabled>
+    </div>
+    <svg id="curveSvg" viewBox="0 0 400 250" role="img" aria-label="Clutch position against paddle position">
+      <g id="curveGrid"></g>
+      <rect id="curveZone"/>
+      <line id="curveBite" class="mark"/>
+      <line id="curveTrig" class="mark"/>
+      <polyline id="curveLine"/>
+      <circle id="curveDot" r="5"/>
+      <text x="215" y="246" text-anchor="middle">paddle, % of travel</text>
+      <text x="12" y="110" text-anchor="middle" transform="rotate(-90 12 110)">clutch, % pulled</text>
+      <text id="curveBiteText" x="372" text-anchor="end">bite</text>
+      <text id="curveTrigText" x="372" text-anchor="end">trigger</text>
+    </svg>
+    <p class="hint" style="margin-top:8px">Blue is the curve as set. The yellow dot is where the node says the paddle
+      and its clutch target are right now. Dashed lines are the bite point and the downshift trigger. The green box
+      is the piecewise zone, used only by the piecewise curve.</p>
+  </section>
+
   <div id="mapWrap">
     <section>
       <h2>Paddle bite zone</h2>
@@ -425,6 +464,107 @@ $('defaults').onclick = () => { if (confirm('Load factory values? Nothing is wri
 // ---------------------------------------------------------------------------
 const ZONE = { padA: 'pw_paddle_start', padB: 'pw_paddle_end', cluA: 'pw_clutch_start', cluB: 'pw_clutch_end' };
 
+// --- response curve graph ---
+// The same maths as paddle.cpp, in fractions of travel: 0 = engaged, 1 = disengaged.
+// A copy can drift from the firmware, so the yellow dot is NOT computed here — it
+// is the node's own paddle position and clutch target. If the dot ever sits off the
+// blue line, this copy is the one that is wrong.
+function mapf(x, inMin, inMax, outMin, outMax) {
+  return inMax === inMin ? outMin : (x - inMin) * (outMax - outMin) / (inMax - inMin) + outMin;
+}
+
+function piecewiseFrac(x) {
+  const xS = cal.pw_paddle_start, xE = cal.pw_paddle_end;
+  const yS = cal.pw_clutch_start / FULL, yE = cal.pw_clutch_end / FULL;
+  const blend = cal.pw_blend;
+  if (blend > 0) {
+    const half = Math.trunc((xE - xS) / 2);
+    const wS = Math.min(blend, xS, half), wE = Math.min(blend, FULL - xE, half);
+    const mMid = (yE - yS) / (xE - xS);
+    if (wS > 0 && x > xS - wS && x < xS + wS) {
+      const mLo = yS / xS, tau = (x - (xS - wS)) / (2 * wS), omt = 1 - tau;
+      return yS + wS * (mMid * tau * tau - mLo * omt * omt);
+    }
+    if (wE > 0 && x > xE - wE && x < xE + wE) {
+      const mHi = (1 - yE) / (FULL - xE), tau = (x - (xE - wE)) / (2 * wE), omt = 1 - tau;
+      return yE + wE * (mHi * tau * tau - mMid * omt * omt);
+    }
+  }
+  if (x <= xS) return mapf(x, 0, xS, 0, yS);
+  if (x <= xE) return mapf(x, xS, xE, yS, yE);
+  return mapf(x, xE, FULL, yE, 1);
+}
+
+function curveFrac(units) {
+  if (cal.curve === 5) return clamp(piecewiseFrac(units), 0, 1);
+  const x = units / FULL, s = cal.strength / 100;
+  switch (cal.curve) {
+    case 1:  return Math.log(1 + x * (Math.exp(s) - 1)) / s;
+    case 2:  return (Math.exp(x * s) - 1) / (Math.exp(s) - 1);
+    case 3:  return x + (x * x * (3 - 2 * x) - x) * (s / 3);
+    case 4:  return Math.pow(x, s);
+    default: return x;
+  }
+}
+
+// Plot area inside the 400 x 250 viewBox.
+const G = { x0: 40, x1: 390, y0: 215, y1: 10 };
+const gx = f => G.x0 + f * (G.x1 - G.x0);
+const gy = f => G.y0 + f * (G.y1 - G.y0);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+(function buildCurveGrid() {
+  const g = $('curveGrid');
+  const add = (tag, attrs, text) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    g.appendChild(el);
+  };
+  for (let i = 0; i <= 4; i++) {
+    const f = i / 4, edge = i === 0 ? 'axis' : 'grid';
+    add('line', { class: edge, x1: gx(f), y1: G.y0, x2: gx(f), y2: G.y1 });
+    add('line', { class: edge, x1: G.x0, y1: gy(f), x2: G.x1, y2: gy(f) });
+    add('text', { x: gx(f), y: G.y0 + 14, 'text-anchor': 'middle' }, f * 100);
+    add('text', { x: G.x0 - 6, y: gy(f) + 4, 'text-anchor': 'end' }, f * 100);
+  }
+  CURVES.forEach((c, i) => $('curveSel').add(new Option(c, i)));
+})();
+
+function travelFrac(counts) {
+  const span = cal.disengaged - cal.engaged;
+  return span ? clamp((counts - cal.engaged) / span, 0, 1) : 0;
+}
+
+function paintCurve() {
+  if ($('pagePw').hidden || cal.curve === undefined) return;
+  $('curveSel').value = cal.curve;
+  if (document.activeElement !== $('strengthBox')) $('strengthBox').value = cal.strength;
+
+  let pts = '';
+  for (let u = 0; u <= FULL; u += 50) pts += gx(u / FULL).toFixed(1) + ',' + gy(curveFrac(u)).toFixed(1) + ' ';
+  $('curveLine').setAttribute('points', pts);
+
+  const mark = (id, counts) => {
+    const y = gy(travelFrac(counts));
+    for (const [k, v] of [['x1', G.x0], ['x2', G.x1], ['y1', y], ['y2', y]]) $(id).setAttribute(k, v);
+    $(id + 'Text').setAttribute('y', y - 4);
+  };
+  mark('curveBite', cal.bite);
+  mark('curveTrig', cal.trigger);
+
+  const zx = gx(cal.pw_paddle_start / FULL), zy = gy(cal.pw_clutch_end / FULL);
+  const zone = $('curveZone');
+  zone.setAttribute('x', zx);
+  zone.setAttribute('y', zy);
+  zone.setAttribute('width', gx(cal.pw_paddle_end / FULL) - zx);
+  zone.setAttribute('height', gy(cal.pw_clutch_start / FULL) - zy);
+  zone.style.display = cal.curve === 5 ? '' : 'none';
+}
+
+$('curveSel').onchange = () => setField('curve', $('curveSel').value);
+$('strengthBox').onchange = () => setField('strength', $('strengthBox').value);
+
 // A range thumb never reaches the track's outer edges — the browser insets it by
 // half its width at each end. Markers, the zone fill and the connector lines all
 // anchor to a thumb, so they need the same inset or they drift off it.
@@ -462,6 +602,7 @@ function paintLinks() {
 }
 
 function paintPw() {
+  paintCurve();
   if ($('pagePw').hidden || cal.pw_paddle_start === undefined) return;
   for (const [id, name] of Object.entries(ZONE)) $(id).value = cal[name];
   if (document.activeElement !== $('blendBox')) $('blendBox').value = cal.pw_blend;
@@ -490,6 +631,9 @@ for (const id of Object.keys(ZONE)) $(id + 'Cap').onclick = () => captureField(Z
 $('blendBox').onchange = () => setField('pw_blend', $('blendBox').value);
 
 function paintPucks(v) {
+  $('curveDot').setAttribute('cx', gx(clamp(v.pad / FULL, 0, 1)));
+  $('curveDot').setAttribute('cy', gy(travelFrac(v.tgt)));
+
   $('padPuck').style.left = clamp(v.pad / FULL, 0, 1) * 100 + '%';
   $('padPuckText').textContent = pct(v.pad);
 
