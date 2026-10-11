@@ -193,6 +193,9 @@ lane: an Android tablet, no internet.
 **Built — a page over USB.** `tools/calibration.html` is one self-contained file: copy
 it to the tablet or laptop and open it in Chrome straight from the file system. It
 shows the live readouts and edits, captures, saves and reloads every calibration field.
+Its Piecewise tab is the ESP32 node's piecewise mapping page carried over: the paddle
+and clutch bite zones as two bars with draggable edges and live position markers, plus
+a slider that moves the clutch directly for testing.
 
 - On Android it uses **WebUSB**. Checked on a Lenovo M10 with Chrome 154: a page opened
   from a file is a secure context, and WebUSB claims the node's CDC interface and

@@ -5,30 +5,80 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>T89 calibration</title>
 <style>
-  :root { --bg:#111; --panel:#1b1b1b; --line:#333; --text:#eee; --dim:#999; --ok:#6c6; --bad:#f66; --accent:#3b82f6; }
+  :root { --bg:#111; --panel:#1b1b1b; --line:#333; --text:#eee; --dim:#999; --ok:#6c6; --bad:#f66;
+          --accent:#3b82f6; --zone:#4CAF50; --puck:#FFD700; --warn:#FF9800; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { font: 16px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; background: var(--bg); color: var(--text); }
   h1 { font-size: 20px; margin: 0 0 12px; }
   h2 { font-size: 15px; margin: 0 0 8px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  p.hint { color: var(--dim); font-size: 13px; margin: 0 0 8px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
   button, input, select { font: inherit; color: var(--text); background: #262626; border: 1px solid #444; border-radius: 6px; padding: 10px 12px; }
   button { cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); }
-  button:disabled { opacity: .4; cursor: default; }
-  input, select { width: 100%; min-width: 0; }
+  button.warn { background: var(--warn); border-color: var(--warn); color: #111; font-weight: 600; }
+  button.warn.active { background: var(--bad); border-color: var(--bad); }
+  button:disabled, input:disabled { opacity: .4; cursor: default; }
+  input[type=range] { padding: 0; border: 0; background: transparent; accent-color: var(--warn); }
+  .row input, .row select { width: 100%; min-width: 0; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #msg { margin-top: 8px; min-height: 1.4em; }
   #msg.ok { color: var(--ok); } #msg.bad { color: var(--bad); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tabs button { flex: 1; border-radius: 6px 6px 0 0; opacity: .5; }
+  .tabs button.on { opacity: 1; border-bottom: 3px solid var(--accent); }
+
   .live { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
   .live div { background: #000; border-radius: 6px; padding: 8px; }
   .live span { display: block; color: var(--dim); font-size: 13px; }
   .live b { font-size: 20px; font-variant-numeric: tabular-nums; }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
+
   .row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
   .row:first-of-type { border-top: 0; }
   .row label small { display: block; color: var(--dim); font-size: 13px; }
   .row .cap { visibility: hidden; }
   .row .cap.on { visibility: visible; }
+
+  /* ---- piecewise bars ---- */
+  /* Every bar carries floating labels above and below it, so both sides get clearance. */
+  .bar-row { display: flex; gap: 8px; align-items: center; margin: 34px 0; }
+  .extent { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; min-width: 62px; text-align: center; }
+  /* No overflow:hidden — the puck's badge and the markers have to escape the bar. */
+  .zonebar { position: relative; flex: 1; height: 48px; background: #000; border: 1px solid #444; border-radius: 6px; }
+  .zone-fill { position: absolute; top: 0; height: 100%; background: rgba(76,175,80,.28);
+               border-top: 1px solid rgba(76,175,80,.55); border-bottom: 1px solid rgba(76,175,80,.55); z-index: 1; pointer-events: none; }
+  .marker { position: absolute; left: 0; transform: translateX(-50%); font-size: 13px; color: var(--dim); white-space: nowrap; pointer-events: none; z-index: 5; }
+  .marker strong { color: var(--text); font-size: 15px; }
+  .above { bottom: 100%; margin-bottom: 6px; }
+  .below { top: 100%; margin-top: 6px; }
+  .puck { position: absolute; top: 0; width: 3px; height: 100%; background: var(--puck); z-index: 4; pointer-events: none; transition: left .05s linear; }
+  .puck.stale { background: #666; }
+  .puck span { position: absolute; left: 50%; transform: translateX(-50%); padding: 2px 7px; background: var(--puck); color: #111;
+               border-radius: 3px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .puck.stale span { background: #666; color: #eee; }
+
+  /* A and B are stacked full-width on the same bar. With a full-width hit area the
+     one painted last would swallow every press, so the tracks take no pointer
+     events and only the thumbs do. */
+  .zonebar input[type=range] { position: absolute; inset: 0; width: 100%; height: 46px; margin: 0; padding: 0; border: 0;
+                               background: transparent; z-index: 3; appearance: none; -webkit-appearance: none; pointer-events: none; }
+  /* Finger-width grab area with a hard line down the middle marking the edge of
+     the zone. Width must stay in sync with THUMB_W in the script. */
+  .zonebar input[type=range]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 28px; height: 46px; border: 0; border-radius: 4px;
+      background: linear-gradient(to right, rgba(76,175,80,.3) 0 11px, var(--zone) 11px 17px, rgba(76,175,80,.3) 17px); cursor: pointer; pointer-events: auto; }
+  .zonebar input[type=range]::-moz-range-thumb { width: 28px; height: 46px; border: 0; border-radius: 4px;
+      background: linear-gradient(to right, rgba(76,175,80,.3) 0 11px, var(--zone) 11px 17px, rgba(76,175,80,.3) 17px); cursor: pointer; pointer-events: auto; }
+  .zonebar input[type=range]::-moz-range-track { background: transparent; border: 0; }
+
+  /* Overlay across both bar sections, for the A-to-A / B-to-B connector lines. */
+  #mapWrap { position: relative; }
+  #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 6; }
+  #links line { stroke: var(--zone); stroke-width: 2; stroke-dasharray: 6 4; opacity: .9; }
+
+  #testSlider { width: 100%; }
 </style>
 </head>
 <body>
@@ -42,29 +92,105 @@
   <div id="msg"></div>
 </section>
 
-<section>
-  <h2>Live</h2>
-  <div class="live" id="live"></div>
-</section>
+<div class="tabs">
+  <button id="tabSettings" class="on">Settings</button>
+  <button id="tabPw">Piecewise</button>
+</div>
 
-<section>
-  <h2>Settings</h2>
-  <div id="fields"></div>
-</section>
+<div id="pageSettings">
+  <section>
+    <h2>Live</h2>
+    <div class="live" id="live"></div>
+  </section>
+  <section>
+    <h2>Settings</h2>
+    <div id="fields"></div>
+  </section>
+</div>
+
+<div id="pagePw" hidden>
+  <div id="mapWrap">
+    <section>
+      <h2>Paddle bite zone</h2>
+      <p class="hint">The bar is the paddle's calibrated travel, idle to pulled. A and B mark the part of it
+        that is spread across the clutch's bite zone below. Only used when the response curve is piecewise.</p>
+      <!-- Above the bar, so the gap between the two bars stays clear for the connector lines. -->
+      <div class="bar">
+        <button class="needs-link" id="padACap" disabled>Set A to live paddle position</button>
+        <button class="needs-link" id="padBCap" disabled>Set B to live paddle position</button>
+      </div>
+      <div class="bar-row" style="margin-bottom:28px">
+        <div class="extent">Idle</div>
+        <div class="zonebar" id="padBar">
+          <div class="zone-fill" id="padFill"></div>
+          <div class="marker above" id="padAMark">A: <strong id="padAText">—</strong></div>
+          <div class="marker above" id="padBMark">B: <strong id="padBText">—</strong></div>
+          <div class="puck" id="padPuck"><span class="below" id="padPuckText">—</span></div>
+          <input type="range" class="needs-link" id="padA" min="0" max="10000" step="10" disabled>
+          <input type="range" class="needs-link" id="padB" min="0" max="10000" step="10" disabled>
+        </div>
+        <div class="extent">Pulled</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="bar-row">
+        <div class="extent">Engaged</div>
+        <div class="zonebar" id="cluBar">
+          <div class="zone-fill" id="cluFill"></div>
+          <div class="marker below" id="cluAMark">A: <strong id="cluAText">—</strong></div>
+          <div class="marker below" id="cluBMark">B: <strong id="cluBText">—</strong></div>
+          <div class="puck" id="cluPuck"><span class="above" id="cluPuckText">—</span></div>
+          <input type="range" class="needs-link" id="cluA" min="0" max="10000" step="10" disabled>
+          <input type="range" class="needs-link" id="cluB" min="0" max="10000" step="10" disabled>
+        </div>
+        <div class="extent">Disengaged</div>
+      </div>
+      <div class="bar">
+        <button class="needs-link" id="cluACap" disabled>Set A to live clutch position</button>
+        <button class="needs-link" id="cluBCap" disabled>Set B to live clutch position</button>
+      </div>
+      <p class="hint" style="margin-top:8px">The bar is the clutch's calibrated travel, engaged to disengaged.
+        A and B are the clutch positions the paddle zone above maps onto.</p>
+      <h2>Clutch bite zone</h2>
+    </section>
+
+    <svg id="links" aria-hidden="true"><line id="linkA"/><line id="linkB"/></svg>
+  </div>
+
+  <section>
+    <h2>Corner smoothing</h2>
+    <p class="hint">Blend width at the two zone edges, in 0.01 % of paddle travel (0–5000). 0 is a sharp corner.</p>
+    <input type="number" inputmode="numeric" class="needs-link" id="blendBox" min="0" max="5000" style="width:140px" disabled>
+  </section>
+
+  <section>
+    <h2>Clutch test</h2>
+    <p class="hint">Takes the clutch away from the paddle and moves it with the slider. It stays under
+      slider control until you hand it back, even if this page disconnects.</p>
+    <button class="warn needs-link" id="testToggle" disabled>Take clutch control</button>
+    <div id="testBar" hidden style="margin-top:12px">
+      <input type="range" id="testSlider" min="0" max="10000" step="50" value="0">
+      <div>Commanding <b id="testText">0.0 %</b> of travel</div>
+    </div>
+  </section>
+</div>
 
 <section>
   <div class="bar">
-    <button id="save" class="primary" disabled>Save to flash</button>
-    <button id="load" disabled>Reload from flash</button>
-    <button id="defaults" disabled>Factory defaults</button>
+    <button id="save" class="primary needs-link" disabled>Save to flash</button>
+    <button id="load" class="needs-link" disabled>Reload from flash</button>
+    <button id="defaults" class="needs-link" disabled>Factory defaults</button>
   </div>
 </section>
 
 <script>
 const BAUD = 115200;
-const LIVE_MS = 250;
+const LIVE_MS = 200;
 const REPLY_MS = 2000;
 const SAVE_REPLY_MS = 5000;     // the flash erase stalls the node for about a second
+const FULL = 10000;             // paddle / clutch travel units used by the firmware
+const THUMB_W = 28;             // must match the range thumb width in the CSS
 
 const CURVES = ['linear', 'log', 'exp', 'smooth', 'power', 'piecewise'];
 const NO_CAPTURE = ['speed', 'curve', 'strength', 'pw_blend'];
@@ -94,6 +220,8 @@ const LABELS = {
 
 const $ = id => document.getElementById(id);
 const enc = new TextEncoder();
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const pct = units => (units / 100).toFixed(1) + ' %';
 
 function say(text, bad) {
   $('msg').textContent = text;
@@ -160,7 +288,6 @@ const dec = new TextDecoder();
 let rxText = '';
 let pending = null;     // { lines, isLast, resolve, reject, timer }
 let chain = Promise.resolve();
-let busy = 0;
 
 function onBytes(bytes) {
   rxText += dec.decode(bytes, { stream: true });
@@ -181,7 +308,6 @@ function onBytes(bytes) {
 }
 
 function request(cmd, isLast, timeoutMs = REPLY_MS) {
-  busy++;
   const run = () => new Promise((resolve, reject) => {
     if (!write) { reject(new Error('not connected')); return; }
     const p = pending = { lines: [], isLast, resolve, reject };
@@ -190,13 +316,13 @@ function request(cmd, isLast, timeoutMs = REPLY_MS) {
     write(enc.encode(cmd + '\r')).catch(fail);
   });
   const result = chain.then(run, run);
-  chain = result.catch(() => {}).then(() => { busy--; });
+  chain = result.catch(() => {});
   return result;
 }
 
 const isReply = line => line.startsWith('@ok') || line.startsWith('@err');
 
-// For set / capture / save / load / defaults. Resolves with the text after "@ok ".
+// For everything except @cal and @live. Resolves with the text after "@ok ".
 async function command(cmd, timeoutMs) {
   const [line] = await request(cmd, isReply, timeoutMs);
   if (line.startsWith('@err')) throw new Error(line.slice(5));
@@ -206,9 +332,10 @@ async function command(cmd, timeoutMs) {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+const cal = {};         // field name -> number, as the node last reported it
 const inputs = {};
 
-function buildField(name, value) {
+function buildField(name) {
   const [title, hint] = LABELS[name] || [name, ''];
   const row = document.createElement('div');
   row.className = 'row';
@@ -228,7 +355,6 @@ function buildField(name, value) {
     input.type = 'number';
     input.inputMode = 'numeric';
   }
-  input.value = value;
   input.onchange = () => setField(name, input.value);
 
   const cap = document.createElement('button');
@@ -241,19 +367,24 @@ function buildField(name, value) {
   inputs[name] = input;
 }
 
+function setCal(name, value) {
+  cal[name] = Number(value);
+  if (!inputs[name]) buildField(name);
+  inputs[name].value = value;
+}
+
 async function loadCal() {
   const lines = await request('@cal', line => line === '@end');
   for (const line of lines) {
     const m = /^@cal (\w+)=(-?\d+)$/.exec(line);
-    if (!m) continue;
-    if (inputs[m[1]]) inputs[m[1]].value = m[2];
-    else buildField(m[1], m[2]);
+    if (m) setCal(m[1], m[2]);
   }
+  paintPw();
 }
 
 function applyOk(reply) {
   const m = /^(\w+)=(-?\d+)$/.exec(reply);
-  if (m && inputs[m[1]]) inputs[m[1]].value = m[2];
+  if (m) { setCal(m[1], m[2]); paintPw(); }
 }
 
 async function setField(name, value) {
@@ -262,7 +393,7 @@ async function setField(name, value) {
     say(name + ' set to ' + value + ' (not saved yet)');
   } catch (e) {
     say(name + ' rejected: ' + e.message, true);
-    loadCal().catch(() => {});      // put the real value back in the box
+    loadCal().catch(() => {});      // put the real value back on screen
   }
 }
 
@@ -290,12 +421,153 @@ $('load').onclick = () => calAction('@load');
 $('defaults').onclick = () => { if (confirm('Load factory values? Nothing is written to flash until you save.')) calAction('@defaults'); };
 
 // ---------------------------------------------------------------------------
+// Piecewise tab
+// ---------------------------------------------------------------------------
+const ZONE = { padA: 'pw_paddle_start', padB: 'pw_paddle_end', cluA: 'pw_clutch_start', cluB: 'pw_clutch_end' };
+
+// A range thumb never reaches the track's outer edges — the browser insets it by
+// half its width at each end. Markers, the zone fill and the connector lines all
+// anchor to a thumb, so they need the same inset or they drift off it.
+function thumbFrac(units, trackW) {
+  const f = clamp(units / FULL, 0, 1);
+  return trackW ? (THUMB_W / 2 + f * (trackW - THUMB_W)) / trackW : f;
+}
+
+const clutchCounts = units => Math.round(cal.engaged + (cal.disengaged - cal.engaged) * units / FULL);
+
+function paintBar(bar, a, b) {
+  const w = $(bar + 'Bar').getBoundingClientRect().width;
+  const aPct = thumbFrac(a, w) * 100, bPct = thumbFrac(b, w) * 100;
+  $(bar + 'AMark').style.left = aPct + '%';
+  $(bar + 'BMark').style.left = bPct + '%';
+  $(bar + 'Fill').style.left = aPct + '%';
+  $(bar + 'Fill').style.width = (bPct - aPct) + '%';
+}
+
+// Connector lines from the paddle bar's lower edge to the clutch bar's upper
+// edge, A to A and B to B. Measured live because both bars are fluid width.
+function paintLinks() {
+  const w = $('mapWrap').getBoundingClientRect();
+  const p = $('padBar').getBoundingClientRect();
+  const c = $('cluBar').getBoundingClientRect();
+  const link = (id, padUnits, cluUnits) => {
+    const el = $(id);
+    el.setAttribute('x1', p.left - w.left + thumbFrac(padUnits, p.width) * p.width);
+    el.setAttribute('y1', p.bottom - w.top);
+    el.setAttribute('x2', c.left - w.left + thumbFrac(cluUnits, c.width) * c.width);
+    el.setAttribute('y2', c.top - w.top);
+  };
+  link('linkA', cal.pw_paddle_start, cal.pw_clutch_start);
+  link('linkB', cal.pw_paddle_end, cal.pw_clutch_end);
+}
+
+function paintPw() {
+  if ($('pagePw').hidden || cal.pw_paddle_start === undefined) return;
+  for (const [id, name] of Object.entries(ZONE)) $(id).value = cal[name];
+  if (document.activeElement !== $('blendBox')) $('blendBox').value = cal.pw_blend;
+
+  $('padAText').textContent = pct(cal.pw_paddle_start);
+  $('padBText').textContent = pct(cal.pw_paddle_end);
+  $('cluAText').textContent = pct(cal.pw_clutch_start) + ' (' + clutchCounts(cal.pw_clutch_start) + ')';
+  $('cluBText').textContent = pct(cal.pw_clutch_end) + ' (' + clutchCounts(cal.pw_clutch_end) + ')';
+  paintBar('pad', cal.pw_paddle_start, cal.pw_paddle_end);
+  paintBar('clu', cal.pw_clutch_start, cal.pw_clutch_end);
+  paintLinks();
+}
+
+// Dragging repaints locally; the value goes to the node when the thumb is let go.
+function bindZone(aId, bId, minGap) {
+  const a = $(aId), b = $(bId);
+  a.oninput = () => { cal[ZONE[aId]] = Math.min(+a.value, +b.value - minGap); paintPw(); };
+  b.oninput = () => { cal[ZONE[bId]] = Math.max(+b.value, +a.value + minGap); paintPw(); };
+  a.onchange = () => setField(ZONE[aId], cal[ZONE[aId]]);
+  b.onchange = () => setField(ZONE[bId], cal[ZONE[bId]]);
+}
+bindZone('padA', 'padB', 10);   // the firmware needs paddle start strictly below end
+bindZone('cluA', 'cluB', 0);
+
+for (const id of Object.keys(ZONE)) $(id + 'Cap').onclick = () => captureField(ZONE[id]);
+$('blendBox').onchange = () => setField('pw_blend', $('blendBox').value);
+
+function paintPucks(v) {
+  $('padPuck').style.left = clamp(v.pad / FULL, 0, 1) * 100 + '%';
+  $('padPuckText').textContent = pct(v.pad);
+
+  const span = cal.disengaged - cal.engaged;
+  const f = v.fb && span ? clamp((v.clu - cal.engaged) / span, 0, 1) : 0;
+  $('cluPuck').style.left = f * 100 + '%';
+  $('cluPuck').classList.toggle('stale', !v.fb);
+  $('cluPuckText').textContent = v.fb ? pct(f * FULL) + ' (' + v.clu + ')' : 'no servo feedback';
+}
+
+// --- clutch test ---
+let override = false;       // the node's own view, from @live
+let commandedUnits = 0;     // where the node last told the clutch to go
+let pullWanted = null, pullBusy = false;
+
+// Slider moves arrive faster than the link answers; only the newest one matters.
+async function pumpPull() {
+  if (pullBusy) return;
+  pullBusy = true;
+  while (pullWanted !== null) {
+    const units = pullWanted;
+    pullWanted = null;
+    try { await command('@pull ' + units); }
+    catch (e) { say('clutch move failed: ' + e.message, true); }
+  }
+  pullBusy = false;
+}
+
+$('testSlider').oninput = () => {
+  $('testText').textContent = pct(+$('testSlider').value);
+  pullWanted = $('testSlider').value;
+  pumpPull();
+};
+
+$('testToggle').onclick = async () => {
+  try {
+    if (override) {
+      say(await command('@release'));
+    } else {
+      // Start from where the clutch already is, so taking control moves nothing.
+      const start = Math.round(commandedUnits / 50) * 50;
+      $('testSlider').value = start;
+      $('testText').textContent = pct(start);
+      await command('@pull ' + start);
+      say('slider controls the clutch; the paddle is ignored');
+    }
+  } catch (e) {
+    say(e.message, true);
+  }
+};
+
+function paintTest(v) {
+  override = !!v.ovr;
+  const span = cal.disengaged - cal.engaged;
+  commandedUnits = span ? clamp((v.cmd - cal.engaged) / span, 0, 1) * FULL : 0;
+  $('testToggle').textContent = override ? 'Hand clutch back to the paddle' : 'Take clutch control';
+  $('testToggle').classList.toggle('active', override);
+  $('testBar').hidden = !override;
+}
+
+function showTab(pw) {
+  $('pageSettings').hidden = pw;
+  $('pagePw').hidden = !pw;
+  $('tabSettings').classList.toggle('on', !pw);
+  $('tabPw').classList.toggle('on', pw);
+  paintPw();
+}
+$('tabSettings').onclick = () => showTab(false);
+$('tabPw').onclick = () => showTab(true);
+window.addEventListener('resize', paintPw);
+
+// ---------------------------------------------------------------------------
 // Live readouts
 // ---------------------------------------------------------------------------
 const LIVE = [
   ['Left hall',      v => v.hl],
   ['Right hall',     v => v.hr],
-  ['Paddle',         v => (v.pad / 100).toFixed(1) + ' %'],
+  ['Paddle',         v => pct(v.pad)],
   ['Paddle target',  v => v.tgt],
   ['Clutch position', v => v.fb ? v.clu + ' (' + v.pull + ' %)' : 'STALE', v => v.fb],
   ['Clutch commanded', v => v.cmd],
@@ -318,8 +590,11 @@ const liveCells = LIVE.map(([title]) => {
   return b;
 });
 
+let liveQueued = false;
+
 async function pollLive() {
-  if (!write || busy) return;       // never queue behind a user action
+  if (!write || liveQueued) return;     // at most one poll waiting in the queue
+  liveQueued = true;
   try {
     const [line] = await request('@live', l => l.startsWith('@live'));
     const v = {};
@@ -331,7 +606,10 @@ async function pollLive() {
       liveCells[i].textContent = text(v);
       liveCells[i].className = good ? (good(v) ? 'ok' : 'bad') : '';
     });
+    paintPucks(v);
+    paintTest(v);
   } catch (e) { /* a missed poll is not worth a message; the next one retries */ }
+  liveQueued = false;
 }
 setInterval(pollLive, LIVE_MS);
 
@@ -342,7 +620,7 @@ function setConnected(on) {
   $('link').textContent = on ? 'connected' : 'not connected';
   $('link').className = on ? 'ok' : 'bad';
   $('connect').disabled = on;
-  for (const id of ['save', 'load', 'defaults']) $(id).disabled = !on;
+  for (const el of document.querySelectorAll('.needs-link')) el.disabled = !on;
 }
 
 function onDisconnect(e) {

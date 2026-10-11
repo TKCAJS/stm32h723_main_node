@@ -500,6 +500,8 @@ static void _dispatch(char *line) {
 //   @capture <field>      -> "@ok <field>=<value>"  | "@err <reason>"
 //   @save|@load|@defaults -> "@ok <what happened>"  | "@err <reason>"
 //   @live                 -> "@live k=v k=v ..."    one line, polled by the page
+//   @pull <0..10000>      -> "@ok pull=<n> cmd=<counts>"   as `pull`, in 0.01 % of travel
+//   @release              -> "@ok ..."              as `release`: paddle drives the clutch
 
 static void _machine_live() {
     char b[200];
@@ -570,6 +572,24 @@ static void _machine(char *line) {
     }
 
     if (!strcmp(cmd, "defaults")) { clutch_cal_defaults(); _p("@ok factory values loaded, not saved\r\n"); return; }
+
+    if (!strcmp(cmd, "pull")) {
+        if (argc < 2 || !_num(argv[1], &v) || v < 0 || v > PADDLE_FULL) {
+            _p("@err usage: pull <0..%d of travel>\r\n", PADDLE_FULL);
+            return;
+        }
+        paddle_set_override(true);
+        clutch_command_pull((float)v / PADDLE_FULL);
+        _p("@ok pull=%ld cmd=%u\r\n", v, clutch_commanded());
+        return;
+    }
+
+    if (!strcmp(cmd, "release")) {
+        clutch_release();
+        paddle_set_override(false);
+        _p("@ok released, paddle drives the clutch\r\n");
+        return;
+    }
 
     _p("@err unknown command\r\n");
 }
