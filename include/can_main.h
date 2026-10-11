@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// FDCAN1 on PD0/PD1, 500 kbit/s classic, 29-bit extended IDs.
+// FDCAN1 on PIN_CAN_RX/PIN_CAN_TX (PD0/PD1), 500 kbit/s classic, 29-bit extended IDs.
 //
 // Bit timing, filter setup and the data[0]=seq / data[1]=status payload
 // convention are lifted verbatim from stm32h723_transmitter_node — same board,
@@ -21,6 +21,13 @@
 #define CAN_MAIN_MSG_RAM_WORDS   164
 
 bool can_init();
+
+// Route an RX/TX pin pair (Arduino pin numbers from pins.h) to an FDCAN
+// instance, taking the alternate function from the core's PeripheralPins table
+// rather than hard-coding it. Returns false if either pin cannot carry that
+// instance — so a pins.h edit that picks a wrong pin fails init instead of
+// silently driving a dead pair. Shared by can_main.cpp and servo_can.cpp.
+bool can_pins_init(uint32_t rxPin, uint32_t txPin, void *instance);
 
 // Drain the RX FIFO. Call every loop.
 void can_poll();

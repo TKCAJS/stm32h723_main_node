@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// FDCAN2 on PB12/PB13 — the clutch servo's own bus. 250 kbit/s classic,
+// FDCAN2 on PIN_SERVO_CAN_RX/TX (PB12/PB13) — the clutch servo's own bus. 250 kbit/s classic,
 // 29-bit extended IDs, acceptance filter fully open.
 //
 // This is the STM32 port of ServoBus.cpp from esp32_T89Display_cansniff, the

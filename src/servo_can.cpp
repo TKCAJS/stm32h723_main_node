@@ -3,6 +3,7 @@
 #include "servo_can.h"
 #include "can_main.h"
 #include "asmg_md_can.h"
+#include "pins.h"
 
 // Reply deadline. The integration brief targets 20 ms; the bench sniffer used
 // 50 ms because a diagnosis tool would rather wait than lie. In the control
@@ -112,15 +113,7 @@ bool servo_can_init() {
     if (HAL_RCCEx_PeriphCLKConfig(&pclk) != HAL_OK) return false;
 
     __HAL_RCC_FDCAN_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    GPIO_InitTypeDef g = {};
-    g.Pin       = GPIO_PIN_12 | GPIO_PIN_13;  // PB12 = FDCAN2_RX, PB13 = FDCAN2_TX
-    g.Mode      = GPIO_MODE_AF_PP;
-    g.Pull      = GPIO_NOPULL;
-    g.Speed     = GPIO_SPEED_FREQ_HIGH;
-    g.Alternate = GPIO_AF9_FDCAN2;
-    HAL_GPIO_Init(GPIOB, &g);
+    if (!can_pins_init(PIN_SERVO_CAN_RX, PIN_SERVO_CAN_TX, FDCAN2)) return false;
 
     _hfdcan.Instance        = FDCAN2;
     _hfdcan.Init.FrameFormat = FDCAN_FRAME_CLASSIC;

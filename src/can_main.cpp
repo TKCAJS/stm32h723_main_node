@@ -2,6 +2,8 @@
 #include <string.h>
 #include "can_main.h"
 #include "can_ids.h"
+#include "pins.h"
+#include "PeripheralPins.h"
 
 #define MAIN_NODE_FW_VERSION  0x00D6   // 214 — continues the ESP32 main node's numbering
 #define GEAR_TIMEOUT_MS       1000
@@ -15,6 +17,19 @@ static uint32_t _lastGearMs = 0;
 static uint32_t _rxCount = 0;
 static uint8_t  _txSeq = 0;
 
+bool can_pins_init(uint32_t rxPin, uint32_t txPin, void *instance) {
+    PinName rx = digitalPinToPinName(rxPin);
+    PinName tx = digitalPinToPinName(txPin);
+    // Check before configuring: pinmap_pinout() calls Error_Handler() on a pin
+    // missing from the table, and a pin offered by a DIFFERENT FDCAN instance
+    // would be configured without complaint.
+    if (pinmap_peripheral(rx, PinMap_CAN_RD) != instance) return false;
+    if (pinmap_peripheral(tx, PinMap_CAN_TD) != instance) return false;
+    pinmap_pinout(rx, PinMap_CAN_RD);   // enables the port clock, sets the AF
+    pinmap_pinout(tx, PinMap_CAN_TD);
+    return true;
+}
+
 bool can_init() {
     // FDCAN kernel clock from PLL1Q. Generic H723 variant clocks:
     // HSI 64 / M4 * N34 = VCO 544 MHz, /Q4 -> PLL1Q = 136 MHz.
@@ -24,15 +39,7 @@ bool can_init() {
     if (HAL_RCCEx_PeriphCLKConfig(&pclk) != HAL_OK) return false;
 
     __HAL_RCC_FDCAN_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
-
-    GPIO_InitTypeDef g = {};
-    g.Pin       = GPIO_PIN_0 | GPIO_PIN_1;   // PD0 = FDCAN1_RX, PD1 = FDCAN1_TX
-    g.Mode      = GPIO_MODE_AF_PP;
-    g.Pull      = GPIO_NOPULL;
-    g.Speed     = GPIO_SPEED_FREQ_HIGH;
-    g.Alternate = GPIO_AF9_FDCAN1;
-    HAL_GPIO_Init(GPIOD, &g);
+    if (!can_pins_init(PIN_CAN_RX, PIN_CAN_TX, FDCAN1)) return false;
 
     _hfdcan.Instance                  = FDCAN1;
     _hfdcan.Init.FrameFormat          = FDCAN_FRAME_CLASSIC;
