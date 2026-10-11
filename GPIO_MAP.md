@@ -1,7 +1,8 @@
 # GPIO map
 
 Assigned pins, from `include/pins.h` — that file is the source of truth; this is a
-quick-reference copy of it. If the two disagree, `pins.h` wins.
+quick-reference copy of it. If the two disagree, `pins.h` wins. For what each pin
+connects to and the parts it needs, see `WIRING.md`.
 
 | Pin | Function |
 |---|---|
