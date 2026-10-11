@@ -153,13 +153,31 @@ raw 100 ms shift pulses as `ManualMode.h` did. The console's `gb` shows state,
 counters and the last 16 transitions. The logic has been run on the host against
 stubbed clutch and CAN; not yet on hardware.
 
-Not yet: RPM counter, the paddle→clutch response curve (`HallSensorControl`'s
-piecewise/log mapping, which now targets `clutch_command_pull()` instead of a servo
-angle), NeoMatrix driver, SD logging, ShiftLogger. **Until the response curve is in,
-the clutch paddle does not move the clutch** — so shifts out of neutral, which wait for
-the rider to pull the clutch, time out back to N unless the clutch is pulled from the
-console (`pull 100`). Shift timings are compiled-in defaults (40/40/150/150 ms, 30 ms
-ignition cut) until they join the settings protocol.
+**Paddle → clutch response — ported** (`paddle.h`) from `HallSensorControl.h`: the
+linear / log / exp / smooth / power curves and the piecewise bite-zone map with its
+rounded corners, checked on the host against the ESP32's own formulas. The paddle
+drives the clutch while the gearbox is idle; the state machine owns it during a shift;
+manual mode is a straight map over the calibrated travel. Either paddle works the
+clutch (the further-pulled wins). Its settings live in the same calibration blob as
+the clutch (`cal`, `cal capture`, `cal set`, one `cal save`):
+
+- `paddle_l_idle` / `paddle_l_pulled` / `paddle_r_idle` / `paddle_r_pulled` — capture
+  each with the paddle held there. Setting a paddle's idle equal to its pulled switches
+  that paddle off, for a bench with one wired.
+- `curve` (`linear|log|exp|smooth|power|piecewise`), `strength` (×100, 10–500).
+- `pw_paddle_start/end` (capture from the paddle), `pw_clutch_start/end` (capture from
+  the servo) and `pw_blend` — 0..10000 of paddle travel and of clutch travel, so
+  recapturing either end of travel never invalidates the zone.
+
+A hall reading well outside its paddle's calibrated range (a disconnected sensor) is
+treated as idle, never as pulled, and counted (`paddle`). The console's `pos`, `nudge`
+and `pull` take the clutch off the paddle until `release` or `paddle on`. The
+calibration layout changed (version 2), so anything saved before this loads as
+defaults.
+
+Not yet: RPM counter, NeoMatrix driver, SD logging, ShiftLogger. Shift timings are
+compiled-in defaults (40/40/150/150 ms, 30 ms ignition cut) until they join the
+settings protocol.
 
 **Never call `analogRead()` in this project.** It resolves most pins to ADC1 and
 reconfigures whatever it finds there. Analog goes through `hall_adc.h`.

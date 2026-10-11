@@ -8,9 +8,9 @@
 // replaced. What was PWM out and an ADS1115 voltage in is a servo on its own
 // CAN bus, commanded and read in counts (clutch.h).
 //
-// Not yet: the RPM counter, the paddle->clutch response curve (so the clutch
-// only moves when the state machine or the console moves it), the NeoMatrix
-// and SD logging.
+// The paddle->clutch response curve (paddle.h) is a port of HallSensorControl.h.
+//
+// Not yet: the RPM counter, the NeoMatrix and SD logging.
 //
 // The rule this node exists to enforce: nothing in loop() may block. No bus
 // wait, no delay(), no retry loop. Paddles arrive by interrupt and are already
@@ -24,6 +24,7 @@
 #include "servo_can.h"
 #include "clutch.h"
 #include "gearbox.h"
+#include "paddle.h"
 #include "hall_adc.h"
 #include "status_lcd.h"
 #include "serial_cli.h"
@@ -152,6 +153,16 @@ void loop() {
     // it decides on are the freshest this pass has.
     gearbox_tick(_manualMode);
 
+    // Paddle -> clutch, after the state machine so it knows who owns the
+    // clutch this pass: the paddle while the gearbox is idle, the state
+    // machine during a shift (as the ESP32's clutch task stood off whenever
+    // the gearbox was not idle). Manual mode is a straight map.
+    const uint16_t hallL = hall_read_left();
+    const uint16_t hallR = hall_read_right();
+    paddle_tick(hallL, hallR, _manualMode        ? PADDLE_DIRECT
+                            : gearbox_is_idle()  ? PADDLE_CURVED
+                                                 : PADDLE_OFF);
+
     // TODO: rpm from the TIM2 hardware counter (PA0), once wired.
     uint16_t rpm = 0;
     can_tick(rpm, _manualMode);
@@ -176,8 +187,9 @@ void loop() {
     s.clutchJustEngaged = clutch_just_engaged();
     s.clutchCommanded   = clutch_commanded();
 
-    s.hallLeft          = hall_read_left();
-    s.hallRight         = hall_read_right();
+    s.hallLeft          = hallL;
+    s.hallRight         = hallR;
+    s.paddlePos         = paddle_position();
 
     s.canRxCount        = can_rx_count();
     s.canGearAgeMs      = can_gear_age_ms();

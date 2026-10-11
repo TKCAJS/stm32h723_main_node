@@ -32,6 +32,7 @@ typedef struct {
 
     uint16_t hallLeft;
     uint16_t hallRight;
+    uint16_t paddlePos;         // 0..10000, the further-pulled paddle
 
     // --- main bus (rear node) ---
     uint32_t canRxCount;

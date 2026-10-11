@@ -120,7 +120,7 @@ void status_lcd_tick(const StatusInfo *s) {
     }
 
     // Line 4: raw paddle halls, for setting the travel range.
-    _row(3, C_GRAY, "HALL L%5u R%5u", s->hallLeft, s->hallRight);
+    _row(3, C_GRAY, "HALL L%5u R%5u %3u%%", s->hallLeft, s->hallRight, s->paddlePos / 100);
 
     // Line 5: main bus health. Gear age climbing means the rear node went quiet.
     _row(4, (s->canLive && s->canGearAgeMs < 1000) ? C_GREEN : C_RED,

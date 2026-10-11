@@ -39,6 +39,10 @@ pin is reserved but no driver exists, so wiring it is safe but nothing will happ
 - **0–3.3 V max.** Power the halls from 3.3 V, or divide a 5 V sensor's output down. The
   pins have no pull resistor configured.
 - Run the sensor ground back to the board's analog ground, close to the pin.
+- Only one paddle wired on the bench? Switch the other off, or its floating input can
+  read as a pull: `cal set paddle_r_pulled <same value as paddle_r_idle>`. Then capture
+  the wired one: `cal capture paddle_l_idle` at rest, `cal capture paddle_l_pulled`
+  held fully in, `cal save`.
 
 ## Shift and mode inputs — interrupt-driven, active LOW
 

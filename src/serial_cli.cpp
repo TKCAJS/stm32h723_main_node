@@ -7,6 +7,7 @@
 #include "servo_can.h"
 #include "clutch.h"
 #include "gearbox.h"
+#include "paddle.h"
 #include "cal_store.h"
 #include "asmg_md_can.h"
 
@@ -218,11 +219,16 @@ static void _print_help() {
        "pos <counts> [spd]  command an absolute servo position\r\n"
        "nudge <+/-delta>    move relative to the last command\r\n"
        "pull <percent>      command by calibrated travel, 0=engaged 100=disengaged\r\n"
-       "release             command the engaged limit\r\n"
+       "release             command the engaged limit, hand the clutch back to the paddle\r\n"
+       "  (pos/nudge/pull take the clutch off the paddle until release or 'paddle on')\r\n"
+       "paddle              paddle readout: halls, position, curve, target\r\n"
+       "paddle on|off       paddle drives the clutch / console holds it\r\n"
        "-- calibration ----------------------------\r\n"
-       "cal                 show it\r\n"
-       "cal capture <field> name the CURRENT position: engaged|disengaged|trigger|bite\r\n"
-       "cal set <field> <v> engaged|disengaged|trigger|bite|speed\r\n"
+       "cal                 show it, with every field name\r\n"
+       "cal capture <field> take the field from where things are NOW:\r\n"
+       "                    clutch fields from the servo, paddle_* from the halls,\r\n"
+       "                    pw_paddle_* from the paddle, pw_clutch_* from the servo\r\n"
+       "cal set <field> <v> any field; curve takes a name: linear|log|exp|smooth|power|piecewise\r\n"
        "cal save            write to flash; queued until the engine stops\r\n"
        "cal load|defaults   re-read flash / factory values\r\n"
        "\r\nDestructive servo commands (save centre, set id, set bitrate,\r\n"
@@ -238,6 +244,16 @@ static void _print_cal() {
     _p("speed       %5u   (0 fastest .. 1280 slowest)\r\n", c->moveSpeed);
     _p("live        %5u   feedback %s\r\n", clutch_position(),
        clutch_feedback_ok() ? "fresh" : "STALE");
+    _p("-- paddle -> clutch\r\n");
+    _p("paddle_l    idle %5u  pulled %5u%s\r\n", c->hallLeftIdle, c->hallLeftPulled,
+       c->hallLeftIdle == c->hallLeftPulled ? "   (OFF)" : "");
+    _p("paddle_r    idle %5u  pulled %5u%s\r\n", c->hallRightIdle, c->hallRightPulled,
+       c->hallRightIdle == c->hallRightPulled ? "   (OFF)" : "");
+    _p("curve       %s  strength %u.%02u\r\n", paddle_curve_name(c->curve),
+       c->curveStrength / 100, c->curveStrength % 100);
+    _p("piecewise   paddle %u..%u -> clutch %u..%u  blend %u  (0..10000 of travel)\r\n",
+       c->pwPaddleStart, c->pwPaddleEnd, c->pwClutchStart, c->pwClutchEnd, c->pwBlend);
+    _p("fields      %s\r\n", clutch_cal_field_names());
     _p("stored at   0x%08lX%s\r\n", (unsigned long)cal_store_base(),
        _savePending ? "   (save queued until engine stops)" : "");
 }
@@ -356,8 +372,9 @@ static void _dispatch(char *line) {
         // currently calibrated travel to look for it.
         long spd = clutch_cal()->moveSpeed;
         if (argc > 2) _num(argv[2], &spd);
+        paddle_set_override(true);
         servo_command_position((uint16_t)n, (uint16_t)spd);
-        _p("pos %ld speed %ld (raw, unclamped by calibration)\r\n", n, spd);
+        _p("pos %ld speed %ld (raw, unclamped by calibration; paddle off)\r\n", n, spd);
         return;
     }
 
@@ -366,21 +383,40 @@ static void _dispatch(char *line) {
         long t = (long)clutch_commanded() + n;
         if (t < 0) t = 0;
         if (t > asmg::kPositionMax) t = asmg::kPositionMax;
+        paddle_set_override(true);
         clutch_command_counts((uint16_t)t);
-        _p("nudge -> %u (clamped to calibrated travel)\r\n", clutch_commanded());
+        _p("nudge -> %u (clamped to calibrated travel; paddle off)\r\n", clutch_commanded());
         return;
     }
 
     if (!strcmp(cmd, "pull")) {
         if (!_num(argv[1], &n) || n < 0 || n > 100) { _p("usage: pull <0..100>\r\n"); return; }
+        paddle_set_override(true);
         clutch_command_pull((float)n / 100.0f);
-        _p("pull %ld%% -> %u counts\r\n", n, clutch_commanded());
+        _p("pull %ld%% -> %u counts (paddle off)\r\n", n, clutch_commanded());
         return;
     }
 
     if (!strcmp(cmd, "release")) {
         clutch_release();
-        _p("release -> %u counts\r\n", clutch_commanded());
+        paddle_set_override(false);
+        _p("release -> %u counts (paddle on)\r\n", clutch_commanded());
+        return;
+    }
+
+    if (!strcmp(cmd, "paddle")) {
+        if (argc > 1 && !strcmp(argv[1], "on"))  { paddle_set_override(false); _p("paddle drives the clutch\r\n"); return; }
+        if (argc > 1 && !strcmp(argv[1], "off")) { paddle_set_override(true);  _p("paddle off — clutch held by the console\r\n"); return; }
+        const ClutchCal *c = clutch_cal();
+        _p("halls       L %5u  R %5u\r\n", _s ? _s->hallLeft : 0, _s ? _s->hallRight : 0);
+        _p("position    %u.%02u%%   -> clutch %u counts   curve %s\r\n",
+           paddle_position() / 100, paddle_position() % 100, paddle_target(),
+           paddle_curve_name(c->curve));
+        _p("control     %s\r\n", paddle_override() ? "OFF (console holds the clutch)"
+                                 : (_s && _s->manualMode) ? "direct (manual mode)"
+                                 : gearbox_is_idle() ? "curve" : "off — gearbox is shifting");
+        _p("faults      %lu   (readings outside a paddle's range, treated as idle)\r\n",
+           (unsigned long)paddle_fault_count());
         return;
     }
 
@@ -408,13 +444,19 @@ static void _dispatch(char *line) {
             return;
         }
         if (!strcmp(argv[1], "capture")) {
-            if (argc < 3) { _p("usage: cal capture engaged|disengaged|trigger|bite\r\n"); return; }
-            if (clutch_cal_capture(argv[2], &err)) _p("%s = %u (captured)\r\n", argv[2], clutch_position());
-            else                                   _p("rejected: %s\r\n", err);
+            if (argc < 3) { _p("usage: cal capture <field>  (names: see cal)\r\n"); return; }
+            long v = 0;
+            if (clutch_cal_capture(argv[2], &err) && clutch_cal_get(argv[2], &v))
+                _p("%s = %ld (captured)\r\n", argv[2], v);
+            else
+                _p("rejected: %s\r\n", err);
             return;
         }
         if (!strcmp(argv[1], "set")) {
-            if (argc < 4 || !_num(argv[3], &n)) { _p("usage: cal set <field> <value>\r\n"); return; }
+            // curve takes a name as well as a number
+            if (argc >= 4 && !strcmp(argv[2], "curve") && paddle_curve_parse(argv[3]) >= 0)
+                n = paddle_curve_parse(argv[3]);
+            else if (argc < 4 || !_num(argv[3], &n)) { _p("usage: cal set <field> <value>\r\n"); return; }
             if (clutch_cal_set(argv[2], n, &err)) _p("%s = %ld\r\n", argv[2], n);
             else                                  _p("rejected: %s\r\n", err);
             return;

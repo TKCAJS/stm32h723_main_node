@@ -1,12 +1,16 @@
 #include <Arduino.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <math.h>
 #include "clutch.h"
 #include "cal_store.h"
 #include "servo_can.h"
 #include "asmg_md_can.h"
+#include "hall_adc.h"
+#include "paddle.h"
 
-#define CLUTCH_CAL_VERSION  1
+#define CLUTCH_CAL_VERSION  2       // 2: paddle response fields added
 
 // Factory travel, carried across from the ESP32 node rather than invented.
 // There the limits were servo ANGLES, 42 deg and 137 deg of a 0-180 range
@@ -95,6 +99,22 @@ static const char *_validate(const ClutchCal *c) {
                                   : (c->biteCounts >= c->triggerCounts);
     if (!biteIsEngagedSide) return "bite must sit on the engaged side of trigger";
 
+    // --- paddle response ---
+    bool leftOff  = c->hallLeftIdle  == c->hallLeftPulled;
+    bool rightOff = c->hallRightIdle == c->hallRightPulled;
+    if (leftOff && rightOff) return "both paddles off (idle == pulled on each) — the clutch would never move";
+    if (!leftOff  && abs((int32_t)c->hallLeftPulled  - (int32_t)c->hallLeftIdle)  <= 2 * HALL_IDLE_DEADBAND)
+        return "left paddle travel too small (idle and pulled too close)";
+    if (!rightOff && abs((int32_t)c->hallRightPulled - (int32_t)c->hallRightIdle) <= 2 * HALL_IDLE_DEADBAND)
+        return "right paddle travel too small (idle and pulled too close)";
+    if (c->curve >= PADDLE_CURVE_COUNT)                       return "curve: linear|log|exp|smooth|power|piecewise";
+    if (c->curveStrength < 10 || c->curveStrength > 500)       return "strength out of range (10-500 = 0.1-5.0)";
+    if (c->pwPaddleEnd > PADDLE_FULL)                          return "pw_paddle_end out of range (0-10000)";
+    if (c->pwPaddleStart >= c->pwPaddleEnd)                    return "pw_paddle_start must be below pw_paddle_end";
+    if (c->pwBlend > PADDLE_FULL / 2)                          return "pw_blend out of range (0-5000)";
+    if (c->pwClutchEnd > PADDLE_FULL)                          return "pw_clutch_end out of range (0-10000)";
+    if (c->pwClutchStart > c->pwClutchEnd)                     return "pw_clutch_start must not exceed pw_clutch_end";
+
     return NULL;
 }
 
@@ -109,6 +129,23 @@ void clutch_cal_defaults() {
     _cal.triggerCounts    = (uint16_t)(DEFAULT_ENGAGED + (DEFAULT_DISENGAGED - DEFAULT_ENGAGED) * 0.60f);
     _cal.biteCounts       = (uint16_t)(DEFAULT_ENGAGED + (DEFAULT_DISENGAGED - DEFAULT_ENGAGED) * 0.20f);
     _cal.moveSpeed        = DEFAULT_SPEED;
+
+    // Paddle response — HallSensorControl.h's defaults, carried across. Hall
+    // readings x16 for this ADC's 16 bits against the ESP32's 12; the
+    // piecewise zone re-expressed as fractions of paddle travel and of clutch
+    // travel (the ESP32 had it in hall counts and servo degrees: hall
+    // 1000..3000 of 780..3330, servo 98..115 deg of 42..137).
+    _cal.hallLeftIdle     = 780  * 16;
+    _cal.hallLeftPulled   = 3330 * 16;
+    _cal.hallRightIdle    = 1000 * 16;
+    _cal.hallRightPulled  = 3600 * 16;
+    _cal.curve            = PADDLE_LOG;
+    _cal.curveStrength    = 200;            // 2.0
+    _cal.pwPaddleStart    = 863;            // (1000-780)/(3330-780)
+    _cal.pwPaddleEnd      = 8706;           // (3000-780)/(3330-780)
+    _cal.pwBlend          = 471;            // 120/(3330-780)
+    _cal.pwClutchStart    = 5895;           // (98-42)/(137-42)
+    _cal.pwClutchEnd      = 7684;           // (115-42)/(137-42)
     _cal.reserved         = 0;
     _seal(&_cal);
 }
@@ -205,7 +242,24 @@ static const struct { const char *name; size_t off; } _fields[] = {
     { "trigger",    offsetof(ClutchCal, triggerCounts)    },
     { "bite",       offsetof(ClutchCal, biteCounts)       },
     { "speed",      offsetof(ClutchCal, moveSpeed)        },
+    { "paddle_l_idle",   offsetof(ClutchCal, hallLeftIdle)    },
+    { "paddle_l_pulled", offsetof(ClutchCal, hallLeftPulled)  },
+    { "paddle_r_idle",   offsetof(ClutchCal, hallRightIdle)   },
+    { "paddle_r_pulled", offsetof(ClutchCal, hallRightPulled) },
+    { "curve",           offsetof(ClutchCal, curve)           },
+    { "strength",        offsetof(ClutchCal, curveStrength)   },
+    { "pw_paddle_start", offsetof(ClutchCal, pwPaddleStart)   },
+    { "pw_paddle_end",   offsetof(ClutchCal, pwPaddleEnd)     },
+    { "pw_clutch_start", offsetof(ClutchCal, pwClutchStart)   },
+    { "pw_clutch_end",   offsetof(ClutchCal, pwClutchEnd)     },
+    { "pw_blend",        offsetof(ClutchCal, pwBlend)         },
 };
+
+const char *clutch_cal_field_names() {
+    return "engaged disengaged trigger bite speed paddle_l_idle paddle_l_pulled "
+           "paddle_r_idle paddle_r_pulled curve strength pw_paddle_start pw_paddle_end "
+           "pw_clutch_start pw_clutch_end pw_blend";
+}
 
 static bool _apply(const char *field, long value, const char **err) {
     if (value < 0 || value > 0xFFFF) { *err = "value out of range"; return false; }
@@ -224,7 +278,16 @@ static bool _apply(const char *field, long value, const char **err) {
         return true;
     }
 
-    *err = "unknown field (engaged|disengaged|trigger|bite|speed)";
+    *err = "unknown field — see `cal` for the list";
+    return false;
+}
+
+bool clutch_cal_get(const char *field, long *out) {
+    for (unsigned i = 0; i < sizeof(_fields) / sizeof(_fields[0]); i++) {
+        if (strcmp(field, _fields[i].name) != 0) continue;
+        *out = *(const uint16_t *)((const uint8_t *)&_cal + _fields[i].off);
+        return true;
+    }
     return false;
 }
 
@@ -233,7 +296,28 @@ bool clutch_cal_set(const char *field, long value, const char **err) {
 }
 
 bool clutch_cal_capture(const char *field, const char **err) {
-    if (strcmp(field, "speed") == 0) { *err = "speed is not a position — use cal set speed"; return false; }
+    // Paddles: the raw hall reading, held where it matters.
+    if (!strcmp(field, "paddle_l_idle") || !strcmp(field, "paddle_l_pulled"))
+        return _apply(field, (long)hall_read_left(), err);
+    if (!strcmp(field, "paddle_r_idle") || !strcmp(field, "paddle_r_pulled"))
+        return _apply(field, (long)hall_read_right(), err);
+
+    // The piecewise paddle zone: where the paddle is now, in paddle units.
+    if (!strcmp(field, "pw_paddle_start") || !strcmp(field, "pw_paddle_end"))
+        return _apply(field, (long)paddle_from_halls(&_cal, hall_read_left(), hall_read_right(), NULL), err);
+
+    if (!strcmp(field, "speed") || !strcmp(field, "curve") ||
+        !strcmp(field, "strength") || !strcmp(field, "pw_blend")) {
+        *err = "not a position — use cal set";
+        return false;
+    }
+
+    // Everything else is a clutch position.
     if (!clutch_feedback_ok()) { *err = "no fresh servo feedback — nothing to capture"; return false; }
+
+    // The piecewise clutch zone is a fraction of travel, not a raw count.
+    if (!strcmp(field, "pw_clutch_start") || !strcmp(field, "pw_clutch_end"))
+        return _apply(field, (long)lroundf(clutch_pull_fraction() * PADDLE_FULL), err);
+
     return _apply(field, (long)clutch_position(), err);
 }

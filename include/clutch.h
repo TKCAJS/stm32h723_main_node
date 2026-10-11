@@ -38,6 +38,28 @@ typedef struct {
     uint16_t triggerCounts;      // past this, toward disengaged, the clutch is "pulled"
     uint16_t biteCounts;         // engaged-side edge of the just-engaged window
     uint16_t moveSpeed;          // 0x01 speed word used for runtime moves
+
+    // --- paddle -> clutch response (paddle.h) ---
+    // Raw hall ADC, 16-bit. Each paddle has its own idle/pulled pair; the
+    // paddle position is the further-pulled of the two, so either paddle
+    // works the clutch. Idle captures carry a noise deadband (paddle.h).
+    uint16_t hallLeftIdle;
+    uint16_t hallLeftPulled;
+    uint16_t hallRightIdle;
+    uint16_t hallRightPulled;
+    uint16_t curve;              // PaddleCurve
+    uint16_t curveStrength;      // x100: 10..500 = 0.1..5.0
+    // Piecewise curve: a paddle zone mapped onto a clutch zone, so the paddle
+    // spends most of its travel where the clutch actually bites. Both in
+    // 0..10000 of their own travel — paddle idle..pulled, clutch engaged..
+    // disengaged — so recalibrating either end never invalidates the zone.
+    // blend rounds the two corners (paddle units).
+    uint16_t pwPaddleStart;
+    uint16_t pwPaddleEnd;
+    uint16_t pwClutchStart;
+    uint16_t pwClutchEnd;
+    uint16_t pwBlend;
+
     uint16_t reserved;           // keeps the struct 4-byte aligned; must stay 0
     uint32_t crc;                // MUST remain last
 } ClutchCal;
@@ -72,7 +94,8 @@ uint16_t clutch_commanded();                // last target this node sent
 // --- calibration ---
 const ClutchCal *clutch_cal();
 
-// Field names for the two below: engaged, disengaged, trigger, bite, speed.
+// Field names for the two below: engaged, disengaged, trigger, bite, speed,
+// and the paddle fields — see clutch_cal_field_names().
 // Both reject rather than clamp — firmware is the authority, exactly as
 // calValidate() was on the ESP32 node. *err is set to a printable reason on
 // failure and left alone on success.
@@ -84,5 +107,11 @@ bool clutch_cal_set(const char *field, long value, const char **err);
 bool clutch_cal_capture(const char *field, const char **err);
 
 void clutch_cal_defaults();
+
+// The settable field names, space-separated, for help text and errors.
+const char *clutch_cal_field_names();
+
+// Read one field by name. False for an unknown name.
+bool clutch_cal_get(const char *field, long *out);
 bool clutch_cal_save();     // BLOCKS on a flash erase — deferred while the engine runs, see cal_store.h
 bool clutch_cal_load();
