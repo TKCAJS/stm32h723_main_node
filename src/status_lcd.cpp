@@ -95,8 +95,9 @@ void status_lcd_tick(const StatusInfo *s) {
     // Line 1: what the box is doing. Red gear when the rear node is not
     // reporting — that is the one field a wrong answer would be dangerous.
     _row(0, s->gearValid ? C_WHITE : C_RED,
-         "G%c %5u rpm %s", _gear_char(s->gear, s->gearValid), s->rpm,
-         s->manualMode ? "MAN" : "AUT");
+         "G%c %5u rpm %s %c", _gear_char(s->gear, s->gearValid), s->rpm,
+         s->manualMode ? "MAN" : "AUT",
+         (s->gbShifting && s->gbLetter) ? s->gbLetter : ' ');
 
     // Line 2: clutch position, in the servo's own counts, straight from the
     // servo's CAN reply. STALE is a state the analog path could not report —
@@ -134,7 +135,9 @@ void status_lcd_tick(const StatusInfo *s) {
 
     // Line 7: paddle event counters — press a paddle, watch it move. A paddle
     // that never increments is a wiring fault, not a firmware mystery.
-    _row(6, C_YELLOW, "U%lu D%lu N%lu M%lu",
+    // A counts downshifts aborted because the clutch never confirmed pulled.
+    _row(6, s->gbAborts ? C_RED : C_YELLOW, "U%lu D%lu N%lu M%lu A%lu",
          (unsigned long)s->shiftUpCount, (unsigned long)s->shiftDownCount,
-         (unsigned long)s->neutralCount, (unsigned long)s->markCount);
+         (unsigned long)s->neutralCount, (unsigned long)s->markCount,
+         (unsigned long)s->gbAborts);
 }

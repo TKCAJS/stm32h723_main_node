@@ -6,6 +6,7 @@
 #include "serial_cli.h"
 #include "servo_can.h"
 #include "clutch.h"
+#include "gearbox.h"
 #include "cal_store.h"
 #include "asmg_md_can.h"
 
@@ -163,6 +164,29 @@ static void _print_mon() {
        (unsigned long)(_s ? _s->maxLoopUs : 0));
 }
 
+static void _print_gearbox() {
+    const GearboxTiming *t = gearbox_timing();
+    _p("\r\n-- gearbox ---------------------------------\r\n");
+    _p("state        %s%s\r\n", gearbox_state_name(gearbox_state()),
+       (_s && _s->manualMode) ? "   (MANUAL — state machine paused)" : "");
+    _p("gear         %u   expected %u   stack target %u\r\n",
+       gearbox_gear(), gearbox_expected_gear(), gearbox_target_gear());
+    _p("counters     aborted %lu   timed out %lu   rejected %lu\r\n",
+       (unsigned long)gearbox_abort_count(), (unsigned long)gearbox_timeout_count(),
+       (unsigned long)gearbox_rejected_count());
+    _p("timing ms    up %u  down %u  neutral up %u  neutral down %u  ign cut %u\r\n",
+       t->shiftUpMs, t->shiftDownMs, t->neutralUpMs, t->neutralDownMs, t->ignCutMs);
+
+    GearboxTrace tr[16];
+    uint8_t n = gearbox_trace(tr, 16);
+    if (n) _p("-- last transitions (ms  from -> to  gear/exp/stack)\r\n");
+    for (uint8_t i = 0; i < n; i++) {
+        _p("%8lu  %s -> %s  %u/%u/%u\r\n", (unsigned long)tr[i].ms,
+           gearbox_state_name(tr[i].from), gearbox_state_name(tr[i].to),
+           tr[i].gear, tr[i].expected, tr[i].target);
+    }
+}
+
 static void _print_trace() {
     ServoTrace t[8];
     uint32_t n = servo_trace_read(&_traceSeq, t, 8);
@@ -178,6 +202,7 @@ static void _print_trace() {
 static void _print_help() {
     _puts("\r\n-- readouts --------------------------------\r\n"
        "status              full health dump\r\n"
+       "gb                  gearbox state, counters, last transitions\r\n"
        "mon [ms|off]        stream one live line (default 250 ms)\r\n"
        "trace on|off        stream raw servo-bus frames\r\n"
        "-- servo bus -------------------------------\r\n"
@@ -257,6 +282,7 @@ static void _dispatch(char *line) {
 
     if (!strcmp(cmd, "help") || !strcmp(cmd, "?")) { _print_help(); return; }
     if (!strcmp(cmd, "status"))                    { _print_status(); return; }
+    if (!strcmp(cmd, "gb"))                        { _print_gearbox(); return; }
 
     if (!strcmp(cmd, "mon")) {
         if (argc > 1 && !strcmp(argv[1], "off")) { _monOn = false; _p("mon off\r\n"); return; }

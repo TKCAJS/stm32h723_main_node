@@ -163,6 +163,16 @@ bool clutch_just_engaged() {
     return !_pastToward(pos, _cal.triggerCounts) && _pastToward(pos, _cal.biteCounts);
 }
 
+bool clutch_at_bite() {
+    if (!clutch_feedback_ok()) return false;
+    int32_t span = (int32_t)_cal.disengagedCounts - (int32_t)_cal.engagedCounts;
+    int32_t tol  = (span < 0 ? -span : span) / 100 + 1;
+    // Distance from the bite point toward disengaged; <= 0 is the engaged side.
+    int32_t d = (int32_t)clutch_position() - (int32_t)_cal.biteCounts;
+    if (!_countsRise()) d = -d;
+    return d <= tol;
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -180,6 +190,7 @@ void clutch_command_pull(float fraction) {
 }
 
 void clutch_release() { clutch_command_counts(_cal.engagedCounts); }
+void clutch_command_bite() { clutch_command_counts(_cal.biteCounts); }
 
 uint16_t clutch_commanded()   { return _commanded; }
 const ClutchCal *clutch_cal() { return &_cal; }

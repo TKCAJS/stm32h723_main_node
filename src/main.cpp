@@ -1,15 +1,16 @@
-// T89 main node — STM32H723ZGT6. Bring-up scaffold.
+// T89 main node — STM32H723ZGT6.
 //
-// What this is: the hardware layer, proving the pin map on the bench. Inputs,
-// CAN to the rear node, CAN to the clutch servo, and a diagnostic readout.
+// Inputs, CAN to the rear node, CAN to the clutch servo, the gearbox state
+// machine, and a diagnostic readout.
 //
-// What this is NOT yet: the gearbox state machine. That is a deliberate port
-// from src/main_node/GearboxStateMachine.* in the T89 repo and wants its own
-// review — the logic is sound and hard-won, it is only the I/O underneath it
-// that is being replaced. The clutch half of that I/O is now done: what was
-// PWM out and an ADS1115 voltage in is a servo on its own CAN bus, commanded
-// and read in counts (clutch.h). The state machine's two clutch predicates
-// survive verbatim in meaning — clutch_disengaged() and clutch_just_engaged().
+// The state machine (gearbox.h) is a port of src/main_node/GearboxStateMachine.*
+// in the T89 repo — the logic is unchanged, only the I/O underneath it was
+// replaced. What was PWM out and an ADS1115 voltage in is a servo on its own
+// CAN bus, commanded and read in counts (clutch.h).
+//
+// Not yet: the RPM counter, the paddle->clutch response curve (so the clutch
+// only moves when the state machine or the console moves it), the NeoMatrix
+// and SD logging.
 //
 // The rule this node exists to enforce: nothing in loop() may block. No bus
 // wait, no delay(), no retry loop. Paddles arrive by interrupt and are already
@@ -22,6 +23,7 @@
 #include "can_main.h"
 #include "servo_can.h"
 #include "clutch.h"
+#include "gearbox.h"
 #include "hall_adc.h"
 #include "status_lcd.h"
 #include "serial_cli.h"
@@ -51,16 +53,27 @@ static bool     _manualMode = false;
 
 static void handle_input(const InputEvent *e) {
     switch (e->id) {
+        // Auto mode: presses go to the state machine. Manual mode: raw shift
+        // pulses to the rear node — no clutch, no interlock — as ManualMode.h
+        // did on the ESP32 node. Neutral has no manual action.
         case INPUT_SHIFT_UP:
-            if (e->pressed) _upCount++;
+            if (!e->pressed) break;
+            _upCount++;
+            if (_manualMode) gearbox_manual_shift(true);
+            else             gearbox_shift_up_pressed();
             break;
 
         case INPUT_SHIFT_DOWN:
-            if (e->pressed) _downCount++;
+            if (!e->pressed) break;
+            _downCount++;
+            if (_manualMode) gearbox_manual_shift(false);
+            else             gearbox_shift_down_pressed();
             break;
 
         case INPUT_NEUTRAL:
-            if (e->pressed) _neutralCount++;
+            if (!e->pressed) break;
+            _neutralCount++;
+            if (!_manualMode) gearbox_neutral_pressed();
             break;
 
         // A switch, not a long-press. The ESP32 node overloaded a button hold
@@ -78,8 +91,6 @@ static void handle_input(const InputEvent *e) {
         default:
             break;
     }
-    // Shift commands are deliberately not sent here yet — the state machine
-    // port owns that decision, including the clutch and stacking rules.
 }
 
 void setup() {
@@ -89,6 +100,9 @@ void setup() {
     status_lcd_banner("T89 MAIN H723", true);
 
     inputs_init();
+    // A switch, so read where it already sits: one left ON across a power
+    // cycle produces no edge, and would otherwise boot into auto.
+    _manualMode = inputs_level(INPUT_MANUAL_MODE);
 
     if (!hall_adc_init()) {
         status_lcd_banner("ADC FAIL", false);
@@ -113,6 +127,7 @@ void setup() {
     // node still has to boot and be driveable to the point where it can be
     // calibrated over the console.
     clutch_init();
+    gearbox_init();
 
     serial_cli_init();
 
@@ -133,6 +148,10 @@ void loop() {
     // can_poll() it only ever moves what has already arrived.
     servo_can_poll();
 
+    // After both buses have been drained, so the gear and the clutch position
+    // it decides on are the freshest this pass has.
+    gearbox_tick(_manualMode);
+
     // TODO: rpm from the TIM2 hardware counter (PA0), once wired.
     uint16_t rpm = 0;
     can_tick(rpm, _manualMode);
@@ -143,6 +162,10 @@ void loop() {
     s.rpm               = rpm;
     s.engineRunning     = rpm >= ENGINE_RUNNING_RPM;
     s.manualMode        = _manualMode;
+    s.gbState           = (uint8_t)gearbox_state();
+    s.gbShifting        = gearbox_is_shifting();
+    s.gbLetter          = gearbox_shift_letter();
+    s.gbAborts          = gearbox_abort_count();
 
     // The clutch line, in servo counts. Reading it is now two register-free
     // accessor calls over state the servo bus already delivered — no ADC, no

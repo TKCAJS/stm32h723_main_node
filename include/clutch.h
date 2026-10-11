@@ -55,12 +55,18 @@ float    clutch_pull_fraction();   // 0.0 at engaged, 1.0 at disengaged, clamped
 bool clutch_disengaged();
 bool clutch_just_engaged();
 
+// At the bite point, or on its engaged side — within 1 % of travel either
+// way, so a servo settling a count short still counts as arrived. False on
+// stale feedback. Used to hold between stacked downshifts.
+bool clutch_at_bite();
+
 // --- commands ---
 // All clamped to the calibrated travel, so a bad number cannot drive the arm
 // into a stop. Queued to the servo bus; none of these wait for anything.
 void clutch_command_counts(uint16_t counts);
 void clutch_command_pull(float fraction);   // 0.0 engaged .. 1.0 disengaged
 void clutch_release();                      // command the engaged limit
+void clutch_command_bite();                 // command the calibrated bite point
 uint16_t clutch_commanded();                // last target this node sent
 
 // --- calibration ---

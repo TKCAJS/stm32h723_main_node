@@ -142,12 +142,24 @@ console, diagnostic LCD, loop-time watchdog.
 Not compiled yet — the PlatformIO registry is unreachable from the machine this was
 written on, so none of it has been through a toolchain, let alone hardware.
 
-Not yet: the gearbox state machine, RPM counter, the paddle→clutch response curve
-(`HallSensorControl`'s piecewise/log mapping, which now targets
-`clutch_command_pull()` instead of a servo angle), NeoMatrix driver, SD logging.
-The state machine is a deliberate port of
-`src/main_node/GearboxStateMachine.*` — that logic is sound and hard-won; it is only the
-I/O underneath it being replaced.
+**Gearbox state machine — ported** (`gearbox.h`) from
+`src/main_node/GearboxStateMachine.*`. States, transition table, timeouts and stacked
+downshifts are unchanged; only the I/O underneath was replaced. The one real change is
+the stacked-downshift return to the bite point: on the ESP32 it was a voltage, so the
+servo was walked out a step at a time while the feedback was watched; it is a position
+now, so it is commanded directly and `clutch_at_bite()` confirms arrival. A downshift
+whose clutch is never confirmed pulled is still aborted, never sent. Manual mode sends
+raw 100 ms shift pulses as `ManualMode.h` did. The console's `gb` shows state,
+counters and the last 16 transitions. The logic has been run on the host against
+stubbed clutch and CAN; not yet on hardware.
+
+Not yet: RPM counter, the paddle→clutch response curve (`HallSensorControl`'s
+piecewise/log mapping, which now targets `clutch_command_pull()` instead of a servo
+angle), NeoMatrix driver, SD logging, ShiftLogger. **Until the response curve is in,
+the clutch paddle does not move the clutch** — so shifts out of neutral, which wait for
+the rider to pull the clutch, time out back to N unless the clutch is pulled from the
+console (`pull 100`). Shift timings are compiled-in defaults (40/40/150/150 ms, 30 ms
+ignition cut) until they join the settings protocol.
 
 **Never call `analogRead()` in this project.** It resolves most pins to ADC1 and
 reconfigures whatever it finds there. Analog goes through `hall_adc.h`.

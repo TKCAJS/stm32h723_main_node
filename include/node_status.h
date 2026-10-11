@@ -17,6 +17,12 @@ typedef struct {
     bool     engineRunning;     // rpm at or above ENGINE_RUNNING_RPM — `cal save` is deferred
     bool     manualMode;
 
+    // --- gearbox state machine ---
+    uint8_t  gbState;           // GearboxState
+    bool     gbShifting;        // shifting, or waiting for the clutch
+    char     gbLetter;          // last shift letter U D N C, 0 if none yet
+    uint32_t gbAborts;          // downshifts refused: clutch never confirmed — should stay 0
+
     // --- clutch, in servo counts over the servo CAN bus ---
     uint16_t clutchCounts;      // meaningless unless clutchFeedbackOk
     bool     clutchFeedbackOk;  // the servo answered recently
