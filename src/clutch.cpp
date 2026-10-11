@@ -9,8 +9,10 @@
 #include "asmg_md_can.h"
 #include "hall_adc.h"
 #include "paddle.h"
+#include "gearbox.h"
 
-#define CLUTCH_CAL_VERSION  2       // 2: paddle response fields added
+#define CLUTCH_CAL_VERSION  3       // 2: paddle response fields added
+                                    // 3: gearbox shift timings added
 
 // Factory travel, carried across from the ESP32 node rather than invented.
 // There the limits were servo ANGLES, 42 deg and 137 deg of a 0-180 range
@@ -115,6 +117,15 @@ static const char *_validate(const ClutchCal *c) {
     if (c->pwClutchEnd > PADDLE_FULL)                          return "pw_clutch_end out of range (0-10000)";
     if (c->pwClutchStart > c->pwClutchEnd)                     return "pw_clutch_start must not exceed pw_clutch_end";
 
+    // --- shift timings ---
+    // A pulse as long as the state machine's own timeout would be reported as
+    // a failed shift every time, so the limit is that timeout, not a guess.
+    const uint16_t pulses[] = { c->shiftUpMs, c->shiftDownMs, c->neutralUpMs, c->neutralDownMs };
+    for (unsigned i = 0; i < sizeof(pulses) / sizeof(pulses[0]); i++)
+        if (pulses[i] < 1 || pulses[i] >= GEARBOX_SHIFT_TIMEOUT_MS)
+            return "shift times must be 1-499 ms (below the shift timeout)";
+    if (c->ignCutMs >= GEARBOX_SHIFT_TIMEOUT_MS) return "ign_cut_ms out of range (0-499)";
+
     return NULL;
 }
 
@@ -146,7 +157,13 @@ void clutch_cal_defaults() {
     _cal.pwBlend          = 471;            // 120/(3330-780)
     _cal.pwClutchStart    = 5895;           // (98-42)/(137-42)
     _cal.pwClutchEnd      = 7684;           // (115-42)/(137-42)
-    _cal.reserved         = 0;
+
+    // Shift timings — the ESP32 node's defaults.
+    _cal.shiftUpMs        = 150;
+    _cal.shiftDownMs      = 150;
+    _cal.neutralUpMs      = 40;
+    _cal.neutralDownMs    = 40;
+    _cal.ignCutMs         = IGN_CUT_DEFAULT_MS;
     _seal(&_cal);
 }
 
@@ -253,12 +270,18 @@ static const struct { const char *name; size_t off; } _fields[] = {
     { "pw_clutch_start", offsetof(ClutchCal, pwClutchStart)   },
     { "pw_clutch_end",   offsetof(ClutchCal, pwClutchEnd)     },
     { "pw_blend",        offsetof(ClutchCal, pwBlend)         },
+    { "shift_up_ms",     offsetof(ClutchCal, shiftUpMs)       },
+    { "shift_down_ms",   offsetof(ClutchCal, shiftDownMs)     },
+    { "neutral_up_ms",   offsetof(ClutchCal, neutralUpMs)     },
+    { "neutral_down_ms", offsetof(ClutchCal, neutralDownMs)   },
+    { "ign_cut_ms",      offsetof(ClutchCal, ignCutMs)        },
 };
 
 const char *clutch_cal_field_names() {
     return "engaged disengaged trigger bite speed paddle_l_idle paddle_l_pulled "
            "paddle_r_idle paddle_r_pulled curve strength pw_paddle_start pw_paddle_end "
-           "pw_clutch_start pw_clutch_end pw_blend";
+           "pw_clutch_start pw_clutch_end pw_blend shift_up_ms shift_down_ms "
+           "neutral_up_ms neutral_down_ms ign_cut_ms";
 }
 
 static bool _apply(const char *field, long value, const char **err) {
@@ -307,7 +330,8 @@ bool clutch_cal_capture(const char *field, const char **err) {
         return _apply(field, (long)paddle_from_halls(&_cal, hall_read_left(), hall_read_right(), NULL), err);
 
     if (!strcmp(field, "speed") || !strcmp(field, "curve") ||
-        !strcmp(field, "strength") || !strcmp(field, "pw_blend")) {
+        !strcmp(field, "strength") || !strcmp(field, "pw_blend") ||
+        strstr(field, "_ms")) {
         *err = "not a position — use cal set";
         return false;
     }

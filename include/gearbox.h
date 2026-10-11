@@ -24,12 +24,16 @@
 //
 // Not carried over (yet): the ShiftLogger hooks (no SD driver) and the matrix
 // shift letter (no matrix driver) — the letter is kept here for whoever reads
-// it. Shift timings are compiled-in defaults until the settings protocol lands.
+// it. Shift timings live in the calibration blob (clutch.h), edited with `cal`.
 //
 // Nothing here blocks. gearbox_tick() runs every loop pass.
 
 #define IGN_CUT_DEFAULT_MS          30      // as MainCan.h on the ESP32 node
 #define MANUAL_SHIFT_DURATION_MS    100     // as ManualMode.h
+
+// A shifting state that lasts this long is called failed. Unchanged from the
+// ESP32 node. Here because it is also the upper limit on a shift timing.
+#define GEARBOX_SHIFT_TIMEOUT_MS    500
 
 typedef enum {
     // Idle states, one per gear (must stay contiguous — see _isIdle)
@@ -60,14 +64,6 @@ typedef enum {
 
     GB_STATE_COUNT
 } GearboxState;
-
-typedef struct {
-    uint16_t neutralDownMs;     // 2nd -> N half-shift
-    uint16_t neutralUpMs;       // 1st -> N half-shift
-    uint16_t shiftDownMs;
-    uint16_t shiftUpMs;
-    uint16_t ignCutMs;          // upshift ignition cut
-} GearboxTiming;
 
 typedef struct {
     uint32_t     ms;
@@ -106,8 +102,6 @@ char         gearbox_shift_letter();        // U D N C, or 0 — for a display
 uint32_t     gearbox_abort_count();         // downshifts refused: clutch not confirmed
 uint32_t     gearbox_timeout_count();       // shifts that hit the generic timeout
 uint32_t     gearbox_rejected_count();      // presses with no valid transition
-
-const GearboxTiming *gearbox_timing();
 
 // Transition history, oldest first. Returns how many entries were copied.
 uint8_t gearbox_trace(GearboxTrace *out, uint8_t max);

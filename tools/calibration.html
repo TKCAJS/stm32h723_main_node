@@ -85,6 +85,11 @@ const LABELS = {
   pw_clutch_start: ['Piecewise clutch start', '0..10000 of clutch travel'],
   pw_clutch_end:   ['Piecewise clutch end', '0..10000 of clutch travel'],
   pw_blend:        ['Piecewise blend', 'paddle units'],
+  shift_up_ms:     ['Upshift pulse', 'ms, 1..499'],
+  shift_down_ms:   ['Downshift pulse', 'ms, 1..499'],
+  neutral_up_ms:   ['Neutral from 1st pulse', 'ms, 1..499'],
+  neutral_down_ms: ['Neutral from 2nd pulse', 'ms, 1..499'],
+  ign_cut_ms:      ['Upshift ignition cut', 'ms, 0..499'],
 };
 
 const $ = id => document.getElementById(id);
@@ -228,7 +233,7 @@ function buildField(name, value) {
 
   const cap = document.createElement('button');
   cap.textContent = 'Capture';
-  cap.className = NO_CAPTURE.includes(name) ? 'cap' : 'cap on';
+  cap.className = NO_CAPTURE.includes(name) || name.endsWith('_ms') ? 'cap' : 'cap on';
   cap.onclick = () => captureField(name);
 
   row.append(label, input, cap);

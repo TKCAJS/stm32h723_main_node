@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 // Timeouts — unchanged from the ESP32 node
 // ---------------------------------------------------------------------------
-#define STATE_SHIFT_TIMEOUT_MS      500
+// (GEARBOX_SHIFT_TIMEOUT_MS is in gearbox.h.)
 
 // The driver is being waited on to pull the clutch by hand (neutral paths).
 #define CLUTCH_WAIT_TIMEOUT_MS      200
@@ -78,14 +78,6 @@ static const Transition _table[] = {
     { GB_DOWNSHIFT_CLUTCH_ENGAGING, EV_CLUTCH_PULLED, GB_DOWNSHIFT_SHIFTING },
 };
 #define TABLE_LEN (sizeof(_table) / sizeof(_table[0]))
-
-static const GearboxTiming _timing = {
-    40,                     // neutralDownMs
-    40,                     // neutralUpMs
-    150,                    // shiftDownMs
-    150,                    // shiftUpMs
-    IGN_CUT_DEFAULT_MS,     // ignCutMs
-};
 
 static GearboxState _state       = GB_IDLE_NEUTRAL;
 static uint32_t     _stateStart  = 0;
@@ -163,23 +155,24 @@ static void _enterShifting() {
         default:                           _expected = from;                break;
     }
 
+    const ClutchCal *t = clutch_cal();
     switch (_state) {
         case GB_NEUTRAL_DOWN_SHIFTING:
             // Downshift solenoid: 2nd -> N (half-shift) or N -> 1st (full shift)
-            _activateShift(false, (from == 0) ? _timing.shiftDownMs : _timing.neutralDownMs,
+            _activateShift(false, (from == 0) ? t->shiftDownMs : t->neutralDownMs,
                            0, (uint8_t)_expected);
             _letter = (_expected == 0) ? 'N' : 'D';
             break;
 
         case GB_NEUTRAL_UP_SHIFTING:
             // Upshift solenoid, no ignition cut: 1st -> N (half-shift) or N -> 2nd (full shift)
-            _activateShift(true, (from == 0) ? _timing.shiftUpMs : _timing.neutralUpMs,
+            _activateShift(true, (from == 0) ? t->shiftUpMs : t->neutralUpMs,
                            0, (uint8_t)_expected);
             _letter = (_expected == 0) ? 'N' : 'U';
             break;
 
         case GB_UPSHIFTING:
-            _activateShift(true, _timing.shiftUpMs, _timing.ignCutMs, (uint8_t)_expected);
+            _activateShift(true, t->shiftUpMs, t->ignCutMs, (uint8_t)_expected);
             _letter = 'U';
             break;
 
@@ -190,7 +183,7 @@ static void _enterShifting() {
             break;
 
         case GB_DOWNSHIFT_SHIFTING:
-            _activateShift(false, _timing.shiftDownMs, 0, (uint8_t)_expected);
+            _activateShift(false, t->shiftDownMs, 0, (uint8_t)_expected);
             break;
 
         default:
@@ -309,7 +302,7 @@ static void _checkTimeouts() {
     if (_state == GB_DOWNSHIFT_CLUTCH_ENGAGING) return;
     if (_state == GB_DOWNSHIFT_TO_BITE_POINT)   return;
 
-    if (_isShifting(_state) && _elapsed() >= STATE_SHIFT_TIMEOUT_MS) {
+    if (_isShifting(_state) && _elapsed() >= GEARBOX_SHIFT_TIMEOUT_MS) {
         _timeouts++;
         _transitionTo(GB_ERROR_SHIFT_TIMEOUT);
     }
@@ -445,7 +438,6 @@ char     gearbox_shift_letter()     { return _letter; }
 uint32_t gearbox_abort_count()      { return _aborts; }
 uint32_t gearbox_timeout_count()    { return _timeouts; }
 uint32_t gearbox_rejected_count()   { return _rejected; }
-const GearboxTiming *gearbox_timing() { return &_timing; }
 
 const char *gearbox_state_name(GearboxState s) {
     switch (s) {

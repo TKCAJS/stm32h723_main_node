@@ -166,7 +166,7 @@ static void _print_mon() {
 }
 
 static void _print_gearbox() {
-    const GearboxTiming *t = gearbox_timing();
+    const ClutchCal *t = clutch_cal();
     _p("\r\n-- gearbox ---------------------------------\r\n");
     _p("state        %s%s\r\n", gearbox_state_name(gearbox_state()),
        (_s && _s->manualMode) ? "   (MANUAL — state machine paused)" : "");
@@ -253,7 +253,12 @@ static void _print_cal() {
        c->curveStrength / 100, c->curveStrength % 100);
     _p("piecewise   paddle %u..%u -> clutch %u..%u  blend %u  (0..10000 of travel)\r\n",
        c->pwPaddleStart, c->pwPaddleEnd, c->pwClutchStart, c->pwClutchEnd, c->pwBlend);
-    _p("fields      %s\r\n", clutch_cal_field_names());
+    _p("-- shift timings, ms\r\n");
+    _p("shift       up %u  down %u   neutral up %u  down %u   ign cut %u\r\n",
+       c->shiftUpMs, c->shiftDownMs, c->neutralUpMs, c->neutralDownMs, c->ignCutMs);
+    _puts("fields      ");
+    _puts(clutch_cal_field_names());
+    _puts("\r\n");
     _p("stored at   0x%08lX%s\r\n", (unsigned long)cal_store_base(),
        _savePending ? "   (save queued until engine stops)" : "");
 }
@@ -512,7 +517,7 @@ static void _machine_live() {
 }
 
 static void _machine_cal() {
-    char names[256];
+    char names[384];
     strncpy(names, clutch_cal_field_names(), sizeof(names) - 1);
     names[sizeof(names) - 1] = '\0';
     for (char *f = strtok(names, " "); f; f = strtok(NULL, " ")) {

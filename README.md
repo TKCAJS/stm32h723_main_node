@@ -175,9 +175,12 @@ and `pull` take the clutch off the paddle until `release` or `paddle on`. The
 calibration layout changed (version 2), so anything saved before this loads as
 defaults.
 
-Not yet: RPM counter, NeoMatrix driver, SD logging, ShiftLogger. Shift timings are
-compiled-in defaults (40/40/150/150 ms, 30 ms ignition cut) until they join the
-settings protocol.
+Shift timings are in the same blob (version 3, so anything saved before this also
+loads as defaults): `shift_up_ms`, `shift_down_ms`, `neutral_up_ms`, `neutral_down_ms`
+(1–499, below the state machine's 500 ms shift timeout) and `ign_cut_ms` (0–499).
+Defaults are the ESP32 node's: 150/150/40/40 and a 30 ms cut. `cal set` only.
+
+Not yet: RPM counter, NeoMatrix driver, SD logging, ShiftLogger.
 
 **Never call `analogRead()` in this project.** It resolves most pins to ADC1 and
 reconfigures whatever it finds there. Analog goes through `hall_adc.h`.

@@ -60,7 +60,17 @@ typedef struct {
     uint16_t pwClutchEnd;
     uint16_t pwBlend;
 
-    uint16_t reserved;           // keeps the struct 4-byte aligned; must stay 0
+    // --- gearbox shift timings, ms (gearbox.h) ---
+    // Solenoid pulse lengths sent to the rear node. Each must finish inside
+    // GEARBOX_SHIFT_TIMEOUT_MS or the state machine calls the shift failed.
+    uint16_t shiftUpMs;
+    uint16_t shiftDownMs;
+    uint16_t neutralUpMs;        // 1st -> N half-shift
+    uint16_t neutralDownMs;      // 2nd -> N half-shift
+    uint16_t ignCutMs;           // upshift ignition cut
+
+    // 22 uint16_t above, so crc lands 4-byte aligned with no padding. Add
+    // fields in pairs, or the CRC would cover padding bytes.
     uint32_t crc;                // MUST remain last
 } ClutchCal;
 
@@ -95,7 +105,7 @@ uint16_t clutch_commanded();                // last target this node sent
 const ClutchCal *clutch_cal();
 
 // Field names for the two below: engaged, disengaged, trigger, bite, speed,
-// and the paddle fields — see clutch_cal_field_names().
+// the paddle fields and the shift timings — see clutch_cal_field_names().
 // Both reject rather than clamp — firmware is the authority, exactly as
 // calValidate() was on the ESP32 node. *err is set to a printable reason on
 // failure and left alone on success.
