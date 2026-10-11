@@ -34,16 +34,28 @@ quick-reference copy of it. If the two disagree, `pins.h` wins.
 | PC11 | SD_D3 |
 | PC12 | SD_CK |
 | PD2 | SD_CMD |
-| PD5 | fallback console TX (USART2) — only in a non-USB build |
-| PD6 | fallback console RX (USART2) — only in a non-USB build |
+| PD5 | fallback console TX (USART2) — only in a build with the USB flags removed |
+| PD6 | fallback console RX (USART2) — only in a build with the USB flags removed |
 | PA9 | **reserved** — USB_OTG_HS_VBUS, claimed by the USB stack |
 | PA10 | **reserved** — USB_OTG_HS_ID, claimed by the USB stack |
-| PA11 | USB_DM (OTG_HS internal FS PHY) |
-| PA12 | USB_DP (OTG_HS internal FS PHY) |
+| PA11 | USB_DM — **console** (`Serial` = USB CDC, OTG_HS internal FS PHY) |
+| PA12 | USB_DP — **console** (`Serial` = USB CDC, OTG_HS internal FS PHY) |
 
 Left unassigned on purpose: PC0/PC1 (freed ADC1 differential pair, kept spare), PA6
 (freed when the clutch servo stopped being PWM), and PA8 (freed when the NeoMatrix
 moved to PC6 to clear USB).
+
+## Console
+
+| Build | `Serial` is | Pins | Set by |
+|---|---|---|---|
+| Default | USB CDC (OTG_HS, internal FS PHY) | PA11 D− / PA12 D+, on the board's USB-C | `-DUSBCON -DUSBD_USE_CDC -DUSE_USB_HS -DUSE_USB_HS_IN_FS` |
+| Fallback | USART2 | PD5 TX / PD6 RX | `-DPIN_SERIAL_TX=PD5 -DPIN_SERIAL_RX=PD6`, live only once the four USB flags are removed |
+
+Both are set in `platformio.ini`. Enabling USB also claims PA8–PA10 (below). The
+connection is 115200 8N1, local echo off (the node echoes), and CR, LF or CRLF all end
+a line. The node is bike-powered, so the USB link is data-only: VBUS sensing is off,
+and nothing should be powered from, or feed power back into, the host's VBUS.
 
 ## Two pins that are not as free as they look
 
