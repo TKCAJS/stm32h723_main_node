@@ -45,6 +45,13 @@ typedef struct {
     uint32_t servoLatUs;        // last request -> reply
     bool     servoBusOff;
 
+    // --- SD session log ---
+    bool        sdReady;        // mounted, file open, still healthy
+    const char *sdState;        // "logging", "no card", ... (sd_log.h)
+    const char *sdFile;         // "T89_0001.CSV"
+    uint32_t    sdBytes;        // written to the card so far
+    uint32_t    sdWorstMs;      // longest single card write or sync
+
     uint32_t maxLoopUs;         // worst loop pass since boot
     uint32_t inputsDropped;     // queued input events lost — must stay 0
     uint32_t shiftUpCount;      // paddle events seen, so a dead paddle is obvious

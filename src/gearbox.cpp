@@ -3,6 +3,7 @@
 #include "clutch.h"
 #include "can_main.h"
 #include "can_ids.h"
+#include "shift_log.h"
 
 // ---------------------------------------------------------------------------
 // Timeouts — unchanged from the ESP32 node
@@ -159,6 +160,7 @@ static void _enterShifting() {
     switch (_state) {
         case GB_NEUTRAL_DOWN_SHIFTING:
             // Downshift solenoid: 2nd -> N (half-shift) or N -> 1st (full shift)
+            shift_log_start((uint8_t)from, (uint8_t)_expected, (from == 2) ? SHIFT_KIND_NEUTRAL : SHIFT_KIND_DOWN);
             _activateShift(false, (from == 0) ? t->shiftDownMs : t->neutralDownMs,
                            0, (uint8_t)_expected);
             _letter = (_expected == 0) ? 'N' : 'D';
@@ -166,18 +168,22 @@ static void _enterShifting() {
 
         case GB_NEUTRAL_UP_SHIFTING:
             // Upshift solenoid, no ignition cut: 1st -> N (half-shift) or N -> 2nd (full shift)
+            shift_log_start((uint8_t)from, (uint8_t)_expected, (from == 1) ? SHIFT_KIND_NEUTRAL : SHIFT_KIND_UP);
             _activateShift(true, (from == 0) ? t->shiftUpMs : t->neutralUpMs,
                            0, (uint8_t)_expected);
             _letter = (_expected == 0) ? 'N' : 'U';
             break;
 
         case GB_UPSHIFTING:
+            shift_log_start((uint8_t)from, (uint8_t)_expected, SHIFT_KIND_UP);
             _activateShift(true, t->shiftUpMs, t->ignCutMs, (uint8_t)_expected);
             _letter = 'U';
             break;
 
         case GB_DOWNSHIFT_CLUTCH_ENGAGING:
             // Pull the clutch; the shift fires when the servo confirms it.
+            // Timed from here, so a downshift's time includes the clutch pull.
+            shift_log_start((uint8_t)from, (uint8_t)_expected, SHIFT_KIND_DOWN);
             clutch_command_pull(1.0f);
             _letter = 'D';
             break;
@@ -357,9 +363,11 @@ static bool _processEvent(GearboxEvent ev) {
 
 static void _setGear(int gear) {
     if (gear < 0 || gear > 6 || gear == _gear) return;
+    int old = _gear;
     _gear = gear;
 
     _processEvent(EV_GEAR_CHANGED);
+    shift_log_gear_changed((uint8_t)gear, (uint8_t)old);
 
     // Stacked downshift: CAN confirmed the gear — fire the next or clear.
     if (_target > 0) {

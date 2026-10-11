@@ -22,9 +22,9 @@
 //
 // Pattern: 1st <-> N <-> 2nd -> 3rd -> 4th -> 5th -> 6th
 //
-// Not carried over (yet): the ShiftLogger hooks (no SD driver) and the matrix
-// shift letter (no matrix driver) — the letter is kept here for whoever reads
-// it. Shift timings live in the calibration blob (clutch.h), edited with `cal`.
+// Shift timing goes to shift_log.h, as the ShiftLogger hooks did. Not carried
+// over (yet): the matrix shift letter (no matrix driver) — the letter is kept
+// here for whoever reads it. Shift timings live in the calibration blob (clutch.h), edited with `cal`.
 //
 // Nothing here blocks. gearbox_tick() runs every loop pass.
 

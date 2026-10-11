@@ -10,7 +10,7 @@
 //
 // The paddle->clutch response curve (paddle.h) is a port of HallSensorControl.h.
 //
-// Not yet: the RPM counter, the NeoMatrix and SD logging.
+// Not yet: the RPM counter and the NeoMatrix.
 //
 // The rule this node exists to enforce: nothing in loop() may block. No bus
 // wait, no delay(), no retry loop. Paddles arrive by interrupt and are already
@@ -30,6 +30,8 @@
 #include "serial_cli.h"
 #include "node_status.h"
 #include "can_ids.h"
+#include "sd_log.h"
+#include "shift_log.h"
 
 // Loop-time watchdog, carried over from the ESP32 node's v214 fix. There the
 // number was the evidence that a blocking I2C read was eating shift commands.
@@ -86,7 +88,10 @@ static void handle_input(const InputEvent *e) {
         // Stamps the moment into the log so a session can be searched for
         // "that felt wrong" rather than scrubbed end to end.
         case INPUT_LOG_MARK:
-            if (e->pressed) _markCount++;
+            if (e->pressed) {
+                _markCount++;
+                sd_log_line("MARK,%lu", (unsigned long)_markCount);
+            }
             break;
 
         default:
@@ -127,8 +132,13 @@ void setup() {
     // the factory travel stands in — deliberately not a fault: an uncalibrated
     // node still has to boot and be driveable to the point where it can be
     // calibrated over the console.
-    clutch_init();
+    bool calFromFlash = clutch_init();
     gearbox_init();
+
+    // The card is a convenience. No card, or a bad one, costs the log and
+    // nothing else.
+    sd_log_init();
+    sd_log_line("BOOT,cal=%s", calFromFlash ? "flash" : "defaults");
 
     serial_cli_init();
 
@@ -167,6 +177,10 @@ void loop() {
     uint16_t rpm = 0;
     can_tick(rpm, _manualMode);
 
+    shift_log_tick(rpm);
+    // The card is only ever touched with the gearbox idle — never inside a shift.
+    sd_log_tick(gearbox_is_idle());
+
     StatusInfo s = {};
     s.gear              = can_gear();
     s.gearValid         = can_gear_valid();
@@ -200,6 +214,13 @@ void loop() {
     s.servoTimeouts     = sv->timeouts;
     s.servoLatUs        = sv->latLastUs;
     s.servoBusOff       = sv->busOff;
+
+    const SdLogStatus *sd = sd_log_status();
+    s.sdReady           = sd->ready;
+    s.sdState           = sd->state;
+    s.sdFile            = sd->file;
+    s.sdBytes           = sd->bytesWritten;
+    s.sdWorstMs         = sd->maxWriteMs > sd->maxSyncMs ? sd->maxWriteMs : sd->maxSyncMs;
 
     s.maxLoopUs         = _maxLoopUs;
     s.inputsDropped     = inputs_dropped();

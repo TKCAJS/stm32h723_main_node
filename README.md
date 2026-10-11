@@ -119,9 +119,7 @@ is generated from ST's package data. See the table at the end of `GPIO_MAP.md`.
 
 The **LCD pins are settled** — the same five drive the same panel on
 `stm32h723_transmitter_node`, on this same board, and that display works. The **SD set
-is expected correct** (SDMMC1 has little choice about where it lands, and the pins
-check out for the peripheral), but no SD driver exists here yet, so nothing has ever
-driven them: the first card mount is the test.
+works**: `sd_log.cpp` mounts the onboard card and writes to it on these pins.
 
 What genuinely remains is wiring, not pin choice:
 
@@ -180,10 +178,41 @@ loads as defaults): `shift_up_ms`, `shift_down_ms`, `neutral_up_ms`, `neutral_do
 (1–499, below the state machine's 500 ms shift timeout) and `ign_cut_ms` (0–499).
 Defaults are the ESP32 node's: 150/150/40/40 and a 30 ms cut. `cal set` only.
 
-Not yet: RPM counter, NeoMatrix driver, SD logging, ShiftLogger.
+**SD session log — mounts and writes on the node** (`sd_log.h`, `shift_log.h`). The file has
+not yet been read back on a PC, and no real shift has been logged. One
+CSV file per boot on the onboard microSD, `T89_0001.CSV` upward: a `BOOT` line, a
+`SHIFT` line per shift (from, to, rpm, time in ms, kind, ok) and a `MARK` line per press
+of the log-mark button. A shift is timed as the ESP32 `ShiftLogger` did, from the moment
+the state machine starts it until the rear node reports the gear, but it is only called
+failed after 1000 ms: the ESP32's 300 ms cut-off sat inside the range real downshifts
+take, so slow but good shifts were logged as "300, failed".
+`shifts` on the console shows totals and the last 16; `sd` shows the file, bytes written
+and the worst write time; `mark` writes a test line.
+
+Lines queue in RAM and reach the card only while the gearbox is idle, one sector at a
+time. A write still stalls the loop for as long as the card takes — a paddle press in
+that window is queued, not lost, but acted on late — so the worst write time in `sd` is
+the number that says whether a card is fit to ride with. The SD library's own waits on
+the card have no time limit; `sd_log.cpp` bounds them at 500 ms, so a card that dies
+mid-ride costs one stall of about a second and the rest of the log, not the node.
+
+Not yet: RPM counter, NeoMatrix driver.
 
 **Never call `analogRead()` in this project.** It resolves most pins to ADC1 and
 reconfigures whatever it finds there. Analog goes through `hall_adc.h`.
+
+## Tests
+
+`pio test -e native` runs the gearbox state machine, the clutch predicates, the
+calibration rules and the paddle curves on the PC, against a simulated servo, rear node,
+halls and flash (`test/support/sim.h`). It takes about two seconds and needs no board.
+It does need a host `g++` on PATH; on Windows that is WinLibs MinGW-w64.
+
+What it covers is the logic: that no downshift is ever sent before the clutch is
+confirmed pulled, that a jammed servo or stale feedback aborts instead, the stacked
+downshift sequence with the rear node confirming early or late, the neutral paths, and
+every curve end to end in both servo directions. What it cannot cover is anything
+physical — bus timing, real servo travel, the solenoids.
 
 ## Calibration UI
 
@@ -195,7 +224,10 @@ it to the tablet or laptop and open it in Chrome straight from the file system. 
 shows the live readouts and edits, captures, saves and reloads every calibration field.
 Its Piecewise tab is the ESP32 node's piecewise mapping page carried over: the paddle
 and clutch bite zones as two bars with draggable edges and live position markers, plus
-a slider that moves the clutch directly for testing.
+a slider that moves the clutch directly for testing. Above them is a graph of the
+selected response curve with the bite point, the downshift trigger and a live dot; the
+dot is the node's own paddle position and clutch target, so it also shows up any
+difference between the page's copy of the curve maths and the firmware's.
 
 - On Android it uses **WebUSB**. Checked on a Lenovo M10 with Chrome 154: a page opened
   from a file is a secure context, and WebUSB claims the node's CDC interface and

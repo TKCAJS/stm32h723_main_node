@@ -28,12 +28,12 @@ static Arduino_ST7735 _lcd(&_bus, GFX_NOT_DEFINED /* RST on NRST */, 1,
                            true /* IPS */, 80, 160, 26, 1, 26, 1,
                            true /* BGR */);
 
-// 7 rows of size-1 text (6x8 glyphs), 26 characters wide. The servo bus needs
-// a line of its own, so the rows are pitched at 11 px instead of 13 — an 8 px
-// glyph with 3 px of air, and the last baseline at y=68 still inside 80.
-#define ROWS       7
+// 8 rows of size-1 text (6x8 glyphs), 26 characters wide. The servo bus and
+// the SD log each need a line of their own, so the rows are pitched at 10 px —
+// an 8 px glyph with 2 px of air, the last one ending at y=79 of 80.
+#define ROWS       8
 #define ROW_CHARS  27          // 26 + NUL
-#define ROW_Y(i)   (2 + (i) * 11)
+#define ROW_Y(i)   (1 + (i) * 10)
 
 static uint32_t _lastRefresh = 0;
 static char     _shown[ROWS][ROW_CHARS];   // last text actually drawn, per row
@@ -140,4 +140,14 @@ void status_lcd_tick(const StatusInfo *s) {
          (unsigned long)s->shiftUpCount, (unsigned long)s->shiftDownCount,
          (unsigned long)s->neutralCount, (unsigned long)s->markCount,
          (unsigned long)s->gbAborts);
+
+    // Line 8: the SD log. Session number, bytes on the card and the worst
+    // card operation — bytes climbing is the proof that writes are landing.
+    // "no card" is yellow, not red: the node runs the same without one.
+    if (s->sdReady) {
+        _row(7, C_GREEN, "SD #%.4s %luB w%lums", s->sdFile + 4,
+             (unsigned long)s->sdBytes, (unsigned long)s->sdWorstMs);
+    } else {
+        _row(7, strcmp(s->sdState, "no card") == 0 ? C_YELLOW : C_RED, "SD %s", s->sdState);
+    }
 }

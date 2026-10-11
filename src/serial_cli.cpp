@@ -9,6 +9,8 @@
 #include "gearbox.h"
 #include "paddle.h"
 #include "cal_store.h"
+#include "sd_log.h"
+#include "shift_log.h"
 #include "asmg_md_can.h"
 
 // Output ring. Sized to hold the longest burst the console can produce (a full
@@ -149,6 +151,7 @@ static void _print_status() {
     _p("cal          engaged %u  disengaged %u  trigger %u  bite %u  speed %u\r\n",
        c->engagedCounts, c->disengagedCounts, c->triggerCounts, c->biteCounts, c->moveSpeed);
     if (_outDropped) _p("console      %lu output lines dropped\r\n", (unsigned long)_outDropped);
+    _p("sd log       %s   (details: sd)\r\n", sd_log_status()->state);
 }
 
 // One line, for `mon`. Everything that moves, nothing that does not.
@@ -188,6 +191,30 @@ static void _print_gearbox() {
     }
 }
 
+static void _print_sd() {
+    const SdLogStatus *s = sd_log_status();
+    _p("\r\n-- sd log ----------------------------------\r\n");
+    _p("state        %s\r\n", s->state);
+    if (s->file[0]) _p("file         %s\r\n", s->file);
+    _p("written      %lu bytes in %lu writes   pending %u\r\n",
+       (unsigned long)s->bytesWritten, (unsigned long)s->writes, s->pending);
+    _p("worst        write %lu ms   sync %lu ms   (the loop stalls for this long)\r\n",
+       (unsigned long)s->maxWriteMs, (unsigned long)s->maxSyncMs);
+    _p("dropped      %lu lines\r\n", (unsigned long)s->linesDropped);
+}
+
+static void _print_shifts() {
+    _p("\r\n-- shifts ----------------------------------\r\n");
+    _p("total %lu   failed %lu   average %u ms\r\n", (unsigned long)shift_log_total(),
+       (unsigned long)shift_log_failed(), shift_log_average_ms());
+    ShiftRecord r[SHIFT_LOG_RECENT];
+    uint8_t n = shift_log_recent(r, SHIFT_LOG_RECENT);
+    if (n) _p("      ms  from to   rpm  time  kind     ok\r\n");
+    for (uint8_t i = 0; i < n; i++)
+        _p("%8lu  %4u %2u %5u %5u  %-7s  %s\r\n", (unsigned long)r[i].ms, r[i].from, r[i].to,
+           r[i].rpm, r[i].timeMs, shift_log_kind_name(r[i].kind), r[i].ok ? "yes" : "NO");
+}
+
 static void _print_trace() {
     ServoTrace t[8];
     uint32_t n = servo_trace_read(&_traceSeq, t, 8);
@@ -204,6 +231,9 @@ static void _print_help() {
     _puts("\r\n-- readouts --------------------------------\r\n"
        "status              full health dump\r\n"
        "gb                  gearbox state, counters, last transitions\r\n"
+       "shifts              shift times: totals and the last 16\r\n"
+       "sd                  SD log: file, bytes written, worst write time\r\n"
+       "mark                write a test MARK line to the SD log\r\n"
        "mon [ms|off]        stream one live line (default 250 ms)\r\n"
        "trace on|off        stream raw servo-bus frames\r\n"
        "-- servo bus -------------------------------\r\n"
@@ -322,6 +352,9 @@ static void _dispatch(char *line) {
     if (!strcmp(cmd, "help") || !strcmp(cmd, "?")) { _print_help(); return; }
     if (!strcmp(cmd, "status"))                    { _print_status(); return; }
     if (!strcmp(cmd, "gb"))                        { _print_gearbox(); return; }
+    if (!strcmp(cmd, "shifts"))                    { _print_shifts(); return; }
+    if (!strcmp(cmd, "sd"))                        { _print_sd(); return; }
+    if (!strcmp(cmd, "mark"))                      { sd_log_line("MARK,console"); _p("mark queued\r\n"); return; }
 
     if (!strcmp(cmd, "mon")) {
         if (argc > 1 && !strcmp(argv[1], "off")) { _monOn = false; _p("mon off\r\n"); return; }

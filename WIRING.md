@@ -112,7 +112,7 @@ external resistor needed on the bench.
 | Pin(s) | Function | Driver |
 |---|---|---|
 | PE10–PE14 | 0.96" ST7735 status LCD (BLK, CS, SCK, DC, MOSI) | yes |
-| PC8–PC12, PD2 | microSD slot, SDMMC1 4-bit | not yet |
+| PC8–PC12, PD2 | microSD slot, SDMMC1 4-bit | yes |
 | PC13 | onboard user button | not yet |
 | PA13 / PA14 | SWD for the ST-Link | — |
 

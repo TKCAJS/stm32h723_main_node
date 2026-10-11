@@ -88,8 +88,8 @@ PD0/PD1 FDCAN1 RX/TX (AF9) · PB12/PB13 FDCAN2 RX/TX (AF9) · PA2/PA3 ADC12_INP1
 USART2.
 
 The LCD pins are stronger than that: they are proven in service on
-`stm32h723_transmitter_node`, same board, same panel. The SD pins are the weakest —
-valid for SDMMC1, but no driver has ever driven them here.
+`stm32h723_transmitter_node`, same board, same panel. The SD pins are proven here:
+`sd_log.cpp` mounts the onboard card and writes to it.
 
 Two near-misses worth knowing, neither of them live: **PB13** is also SDMMC1_D0 (we
 use PC8 for D0), and **PB8/PB9** are also FDCAN1 RX/TX alternates (we use PD0/PD1).

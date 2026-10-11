@@ -171,12 +171,10 @@
 // this set is confirmed valid for the peripheral in the core's PeripheralPins.c
 // for this variant.
 //
-// Expected correct, but UNEXERCISED: there is no SD driver in this repo yet, so
-// unlike the LCD above nothing has ever driven these pins. Treat the first card
-// mount as the test, not as a formality.
+// Proven: sd_log.cpp mounts the onboard card and writes to it on these pins.
 //
-// Rule for later: writes go to a RAM ring and flush when idle. Never touch the
-// card inside a shift.
+// The rule: writes go to a RAM ring and flush when idle. Never touch the card
+// inside a shift.
 #define PIN_SD_D0           PC8
 #define PIN_SD_D1           PC9
 #define PIN_SD_D2           PC10
