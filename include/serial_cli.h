@@ -24,8 +24,8 @@
 // counted — a console is never allowed to stall the shift path, and a
 // half-written line is worse than a missing one.
 //
-// Every command that MOVES something or CHANGES something is refused unless
-// ARM/SAFE reads SAFE. Nobody re-times a clutch from a terminal mid-session.
+// Every command that MOVES something or CHANGES something is refused while
+// the engine is running. Nobody re-times a clutch from a terminal mid-session.
 
 void serial_cli_init();
 

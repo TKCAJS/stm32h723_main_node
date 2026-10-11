@@ -8,7 +8,7 @@
 //
 //  1. EXTI lines are per PIN NUMBER, not per port. PB4 and PA4 cannot both be
 //     interrupt inputs — they share EXTI4. Every interrupt-driven input below
-//     therefore has a distinct pin number (4,5,6,7,8,9 on port B; 0,1,2 on E).
+//     therefore has a distinct pin number (4,5,6,7,8 on port B; 0,1,2 on E).
 //
 //  2. Never call Arduino analogRead() in this project. It resolves a pin to the
 //     first ADC in the pinmap (ADC1 for most pins) and reconfigures it out from
@@ -64,6 +64,9 @@
 // differential sensor rather than spending on a spare GPIO.
 //
 // PA8 joins them: freed when the NeoMatrix moved to PC6 to get clear of USB.
+//
+// PB9 too: it was an ARM/SAFE switch, dropped. Settings changes are gated on
+// the engine being stopped instead (see serial_cli.cpp). EXTI9 is free with it.
 
 // ---------------------------------------------------------------------------
 // Clutch paddle hall sensors — ADC2, single-ended
@@ -134,7 +137,6 @@
 #define PIN_NEUTRAL         PB6     // EXTI6
 #define PIN_MANUAL_MODE     PB7     // EXTI7  — real toggle switch, not a long-press
 #define PIN_LOG_MARK        PB8     // EXTI8  — stamp a marker into the SD log
-#define PIN_ARM_SAFE        PB9     // EXTI9  — inhibit all shift output (pit safety)
 
 // Diagnostic encoder (KY-040). Driver lifts straight from
 // stm32h723_transmitter_node's encoder.cpp — only these three defines change.

@@ -17,7 +17,7 @@
 // whole node freezes for the best part of a second. Interrupts are not lost
 // (they pend and are serviced late) but nothing else runs. That breaks the one
 // rule this node exists to keep, which is why every path to cal_store_write()
-// is gated behind ARM/SAFE reading SAFE. Never call it from a control path.
+// is gated on the engine being stopped. Never call it from a control path.
 
 // True if a blob of exactly this length was stored and its header is intact.
 // Content validity (version, CRC) is the caller's business.

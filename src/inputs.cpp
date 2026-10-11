@@ -12,7 +12,7 @@
 
 static const uint32_t _pin[INPUT_COUNT] = {
     PIN_SHIFT_UP, PIN_SHIFT_DOWN, PIN_NEUTRAL,
-    PIN_MANUAL_MODE, PIN_LOG_MARK, PIN_ARM_SAFE
+    PIN_MANUAL_MODE, PIN_LOG_MARK
 };
 
 static volatile InputEvent _q[QUEUE_LEN];
@@ -45,18 +45,16 @@ static void _isr_shift_down()  { _push(INPUT_SHIFT_DOWN); }
 static void _isr_neutral()     { _push(INPUT_NEUTRAL); }
 static void _isr_manual()      { _push(INPUT_MANUAL_MODE); }
 static void _isr_log_mark()    { _push(INPUT_LOG_MARK); }
-static void _isr_arm_safe()    { _push(INPUT_ARM_SAFE); }
 
 void inputs_init() {
     for (int i = 0; i < INPUT_COUNT; i++) pinMode(_pin[i], INPUT_PULLUP);
 
-    // CHANGE, not FALLING: releases matter too (hold-to-stack, arm/safe state).
+    // CHANGE, not FALLING: releases matter too (hold-to-stack, manual-mode switch).
     attachInterrupt(digitalPinToInterrupt(PIN_SHIFT_UP),    _isr_shift_up,   CHANGE);
     attachInterrupt(digitalPinToInterrupt(PIN_SHIFT_DOWN),  _isr_shift_down, CHANGE);
     attachInterrupt(digitalPinToInterrupt(PIN_NEUTRAL),     _isr_neutral,    CHANGE);
     attachInterrupt(digitalPinToInterrupt(PIN_MANUAL_MODE), _isr_manual,     CHANGE);
     attachInterrupt(digitalPinToInterrupt(PIN_LOG_MARK),    _isr_log_mark,   CHANGE);
-    attachInterrupt(digitalPinToInterrupt(PIN_ARM_SAFE),    _isr_arm_safe,   CHANGE);
 }
 
 bool inputs_pop(InputEvent *out) {

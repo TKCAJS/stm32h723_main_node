@@ -105,7 +105,8 @@ static void _print_status() {
 
     _p("\r\n-- node ------------------------------------\r\n");
     if (_s) {
-        _p("armed        %s  (%s)\r\n", _yn(_s->armed), _s->armed ? "ARMED" : "SAFE");
+        _p("engine       %s  (settings %s)\r\n", _s->engineRunning ? "RUNNING" : "stopped",
+           _s->engineRunning ? "read-only" : "writable");
         _p("mode         %s\r\n", _s->manualMode ? "MANUAL" : "AUTO");
         _p("gear         %u %s   rpm %u\r\n", _s->gear, _s->gearValid ? "" : "(stale)", _s->rpm);
         _p("hall         L %u  R %u\r\n", _s->hallLeft, _s->hallRight);
@@ -187,12 +188,12 @@ static void _print_help() {
        "endian be|le        16-bit word order (bring-up step 3)\r\n"
        "readid|readpid|readcfg   one-shot reads\r\n"
        "clear               zero counters and latency\r\n");
-    _puts("-- clutch (SAFE only) ----------------------\r\n"
+    _puts("-- clutch (engine stopped) ----------------\r\n"
        "pos <counts> [spd]  command an absolute servo position\r\n"
        "nudge <+/-delta>    move relative to the last command\r\n"
        "pull <percent>      command by calibrated travel, 0=engaged 100=disengaged\r\n"
        "release             command the engaged limit\r\n"
-       "-- calibration (SAFE only) -----------------\r\n"
+       "-- calibration (engine stopped) -----------\r\n"
        "cal                 show it\r\n"
        "cal capture <field> name the CURRENT position: engaged|disengaged|trigger|bite\r\n"
        "cal set <field> <v> engaged|disengaged|trigger|bite|speed\r\n"
@@ -220,10 +221,10 @@ static void _print_cal() {
 
 // Every write path comes through here. The rule is the README's: the tablet
 // (and now the terminal) may look at any time, but may only change things with
-// ARM/SAFE reading SAFE.
+// the engine stopped.
 static bool _mayWrite() {
-    if (_s && _s->armed) {
-        _p("refused: ARM/SAFE reads ARMED. Flip it to SAFE first.\r\n");
+    if (_s && _s->engineRunning) {
+        _p("refused: engine running. Stop the engine first.\r\n");
         return false;
     }
     return true;
@@ -376,7 +377,7 @@ static void _dispatch(char *line) {
         if (!strcmp(argv[1], "defaults")) { clutch_cal_defaults(); _p("factory values loaded (not saved)\r\n"); return; }
         if (!strcmp(argv[1], "save")) {
             // Stalls the node for the erase — see cal_store.h. Only reachable
-            // here, and only while SAFE.
+            // here, and only with the engine stopped.
             _p(clutch_cal_save() ? "saved to flash\r\n" : "SAVE FAILED — flash unchanged or erased\r\n");
             return;
         }

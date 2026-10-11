@@ -16,7 +16,6 @@ typedef enum {
     INPUT_NEUTRAL,
     INPUT_MANUAL_MODE,
     INPUT_LOG_MARK,
-    INPUT_ARM_SAFE,
     INPUT_COUNT
 } InputId;
 

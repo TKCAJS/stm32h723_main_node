@@ -14,7 +14,7 @@ typedef struct {
     uint8_t  gear;              // GEAR_UNKNOWN if the rear node has not reported
     bool     gearValid;
     uint16_t rpm;
-    bool     armed;             // ARM/SAFE switch — false inhibits shift output
+    bool     engineRunning;     // rpm at or above ENGINE_RUNNING_RPM — settings are read-only
     bool     manualMode;
 
     // --- clutch, in servo counts over the servo CAN bus ---

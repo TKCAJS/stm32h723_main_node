@@ -19,7 +19,6 @@ connects to and the parts it needs, see `WIRING.md`.
 | PB6 | NEUTRAL (EXTI6) |
 | PB7 | MANUAL_MODE (EXTI7) |
 | PB8 | LOG_MARK (EXTI8) |
-| PB9 | ARM_SAFE (EXTI9) |
 | PE0 | ENC_CLK (EXTI0) |
 | PE1 | ENC_DT (EXTI1) |
 | PE2 | ENC_SW (EXTI2) |
@@ -43,8 +42,8 @@ connects to and the parts it needs, see `WIRING.md`.
 | PA12 | USB_DP — **console** (`Serial` = USB CDC, OTG_HS internal FS PHY) |
 
 Left unassigned on purpose: PC0/PC1 (freed ADC1 differential pair, kept spare), PA6
-(freed when the clutch servo stopped being PWM), and PA8 (freed when the NeoMatrix
-moved to PC6 to clear USB).
+(freed when the clutch servo stopped being PWM), PB9 (was the ARM/SAFE switch,
+dropped), and PA8 (freed when the NeoMatrix moved to PC6 to clear USB).
 
 ## Console
 

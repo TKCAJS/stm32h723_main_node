@@ -96,7 +96,7 @@ void status_lcd_tick(const StatusInfo *s) {
     // reporting — that is the one field a wrong answer would be dangerous.
     _row(0, s->gearValid ? C_WHITE : C_RED,
          "G%c %5u rpm %s", _gear_char(s->gear, s->gearValid), s->rpm,
-         s->armed ? (s->manualMode ? "MAN" : "AUT") : "SAFE");
+         s->manualMode ? "MAN" : "AUT");
 
     // Line 2: clutch position, in the servo's own counts, straight from the
     // servo's CAN reply. STALE is a state the analog path could not report —

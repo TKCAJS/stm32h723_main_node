@@ -170,7 +170,7 @@ an 8-byte frame: `[seq][status][key:2][value:4]`, with the key table in a shared
 the dash and this node cannot disagree about the meaning of a parameter.
 
 Two rules for that channel:
-- **Writes only while ARM/SAFE reads SAFE** (or the engine is stopped). Nobody changes
+- **Writes only with the engine stopped.** Nobody changes
   shift timings from a tablet mid-session.
 - Values live in this node's own flash. The dash is an editor, never the source of truth —
   the node must run standalone with the dash unplugged.
@@ -247,11 +247,12 @@ and `pull` stay inside them.
 
 Two rules, enforced not just documented:
 
-- **Every write is refused unless ARM/SAFE reads SAFE.** Reads are always allowed.
+- **Every write is refused while the engine is running** (rpm ≥ `ENGINE_RUNNING_RPM`).
+  Reads are always allowed.
 - **Values live in this node's own flash** (`cal_store.cpp`, last 128 KB sector).
   `cal save` erases that sector, which stalls the core for the best part of a second
   on a single-bank part — the one place this firmware knowingly breaks its own rule,
-  which is why it is reachable only while SAFE and never from a control path.
+  which is why it is reachable only with the engine stopped and never from a control path.
 
 Destructive servo commands — save centre `0x08`, set bitrate `0x09`, set ID `0xFE`,
 factory reset `0xFC` — are unreachable from the console, the same line the sniffer

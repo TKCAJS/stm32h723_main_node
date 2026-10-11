@@ -33,15 +33,20 @@
 // Here it should sit in the low hundreds of microseconds and stay there.
 //
 // One legitimate exception: `cal save` erases a flash sector and stalls the
-// core for the best part of a second. It is reachable only while ARM/SAFE
-// reads SAFE, and it will leave a mark here — that mark is expected.
+// core for the best part of a second. It is reachable only with the engine
+// stopped, and it will leave a mark here — that mark is expected.
 static uint32_t _maxLoopUs  = 0;
 static uint32_t _loopStalls = 0;
 #define LOOP_STALL_US 20000
 
+// At or above this the engine counts as running, and every settings write —
+// above all `cal save`, which stalls the core — is refused. Below cranking
+// speed, so a stalled-but-turning engine still counts as stopped. Until the
+// RPM counter is wired rpm reads 0, so writes are always allowed on the bench.
+#define ENGINE_RUNNING_RPM  500
+
 static uint32_t _upCount = 0, _downCount = 0, _neutralCount = 0, _markCount = 0;
 static bool     _manualMode = false;
-static bool     _armed      = true;
 
 static void handle_input(const InputEvent *e) {
     switch (e->id) {
@@ -69,13 +74,6 @@ static void handle_input(const InputEvent *e) {
             if (e->pressed) _markCount++;
             break;
 
-        // Hard inhibit while working on the bike. Software must treat this as
-        // authoritative; the wiring should also break the output path so a
-        // firmware bug cannot move the box in the pits.
-        case INPUT_ARM_SAFE:
-            _armed = !e->pressed;
-            break;
-
         default:
             break;
     }
@@ -90,7 +88,6 @@ void setup() {
     status_lcd_banner("T89 MAIN H723", true);
 
     inputs_init();
-    _armed = !inputs_level(INPUT_ARM_SAFE);
 
     if (!hall_adc_init()) {
         status_lcd_banner("ADC FAIL", false);
@@ -143,7 +140,7 @@ void loop() {
     s.gear              = can_gear();
     s.gearValid         = can_gear_valid();
     s.rpm               = rpm;
-    s.armed             = _armed;
+    s.engineRunning     = rpm >= ENGINE_RUNNING_RPM;
     s.manualMode        = _manualMode;
 
     // The clutch line, in servo counts. Reading it is now two register-free

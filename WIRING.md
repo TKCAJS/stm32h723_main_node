@@ -42,7 +42,7 @@ pin is reserved but no driver exists, so wiring it is safe but nothing will happ
 
 ## Shift and mode inputs — interrupt-driven, active LOW
 
-All six use the internal pull-up: wire each switch **between the pin and GND**. No
+All five use the internal pull-up: wire each switch **between the pin and GND**. No
 external resistor needed on the bench.
 
 | Pin | Signal | Closed (to GND) means | Driver |
@@ -52,10 +52,7 @@ external resistor needed on the bench.
 | PB6 | NEUTRAL | button pressed | yes |
 | PB7 | MANUAL_MODE | manual mode (toggle switch, not a button) | yes |
 | PB8 | LOG_MARK | stamp a marker into the log | yes |
-| PB9 | ARM_SAFE | **SAFE** — all shift output inhibited | yes |
 
-- **ARM_SAFE: open = ARMED.** A broken or unplugged wire reads as armed. On the bench,
-  fit the switch closed (SAFE) before connecting anything that moves.
 - PB4 is NJTRST at reset; harmless, SWD (PA13/PA14) is what the ST-Link uses.
 - On the bike these runs want filtering (RC + Schmitt or similar). For the test module,
   bare switches are fine.
@@ -122,11 +119,12 @@ external resistor needed on the bench.
 | PA6 | freed when the clutch servo stopped being PWM |
 | PC0 / PC1 | freed ADC1 differential pair, kept for a future sensor |
 | PA8 | in the USB pin map as SOF; freed when the matrix moved to PC6 |
+| PB9 | spare; was the ARM/SAFE switch, now dropped |
 
 ## Power and ground
 
 - One common ground for the board, both transceivers, the halls, the MAX9926, the
   matrix supply and the servo's CAN ground.
 - The clutch servo has its own supply; only its CAN pair and ground reach this board.
-- Bench first power-up: SAFE switch closed, servo bus connected but servo unpowered,
+- Bench first power-up: servo bus connected but servo unpowered,
   check the LCD comes up and `status` answers on the console, then power the servo.
