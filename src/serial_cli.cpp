@@ -281,16 +281,34 @@ static bool _num(const char *tok, long *out) {
     return true;
 }
 
-static void _dispatch(char *line) {
-    char *argv[4] = { NULL, NULL, NULL, NULL };
+#define ARGV_MAX 4
+
+static int _split(char *line, char *argv[ARGV_MAX]) {
     int argc = 0;
-    for (char *p = line; *p && argc < 4; ) {
+    for (int i = 0; i < ARGV_MAX; i++) argv[i] = NULL;
+    for (char *p = line; *p && argc < ARGV_MAX; ) {
         while (*p == ' ') p++;
         if (!*p) break;
         argv[argc++] = p;
         while (*p && *p != ' ') p++;
         if (*p) *p++ = '\0';
     }
+    return argc;
+}
+
+// A calibration value as typed: a number, or for `curve` one of its names.
+static bool _cal_value(const char *field, const char *tok, long *out) {
+    if (!tok) return false;
+    if (!strcmp(field, "curve") && paddle_curve_parse(tok) >= 0) {
+        *out = paddle_curve_parse(tok);
+        return true;
+    }
+    return _num(tok, out);
+}
+
+static void _dispatch(char *line) {
+    char *argv[ARGV_MAX];
+    int argc = _split(line, argv);
     if (argc == 0) return;
 
     const char *cmd = argv[0];
@@ -453,10 +471,7 @@ static void _dispatch(char *line) {
             return;
         }
         if (!strcmp(argv[1], "set")) {
-            // curve takes a name as well as a number
-            if (argc >= 4 && !strcmp(argv[2], "curve") && paddle_curve_parse(argv[3]) >= 0)
-                n = paddle_curve_parse(argv[3]);
-            else if (argc < 4 || !_num(argv[3], &n)) { _p("usage: cal set <field> <value>\r\n"); return; }
+            if (argc < 4 || !_cal_value(argv[2], argv[3], &n)) { _p("usage: cal set <field> <value>\r\n"); return; }
             if (clutch_cal_set(argv[2], n, &err)) _p("%s = %ld\r\n", argv[2], n);
             else                                  _p("rejected: %s\r\n", err);
             return;
@@ -466,6 +481,92 @@ static void _dispatch(char *line) {
     }
 
     _p("unknown: %s  (try help)\r\n", cmd);
+}
+
+// ---------------------------------------------------------------------------
+// Machine protocol — lines starting with '@', for tools/calibration.html
+// ---------------------------------------------------------------------------
+// Same port, same validation as the typed commands; only the framing differs.
+// A request is not echoed and every reply line starts with '@', so a page can
+// ignore everything else on the wire (banner, mon, trace, a human typing).
+//
+//   @cal                  -> "@cal <field>=<value>" per field, then "@end"
+//   @set <field> <value>  -> "@ok <field>=<value>"  | "@err <reason>"
+//   @capture <field>      -> "@ok <field>=<value>"  | "@err <reason>"
+//   @save|@load|@defaults -> "@ok <what happened>"  | "@err <reason>"
+//   @live                 -> "@live k=v k=v ..."    one line, polled by the page
+
+static void _machine_live() {
+    char b[200];
+    int n = snprintf(b, sizeof(b),
+        "@live hl=%u hr=%u pad=%u tgt=%u clu=%u pull=%d cmd=%u fb=%u dis=%u bite=%u "
+        "ovr=%u gear=%u gv=%u rpm=%u eng=%u man=%u sp=%u\r\n",
+        _s ? _s->hallLeft : 0, _s ? _s->hallRight : 0,
+        paddle_position(), paddle_target(),
+        clutch_position(), (int)(clutch_pull_fraction() * 100.0f), clutch_commanded(),
+        clutch_feedback_ok(), clutch_disengaged(), clutch_just_engaged(),
+        paddle_override(),
+        _s ? _s->gear : 0, _s ? _s->gearValid : 0, _s ? _s->rpm : 0,
+        _s ? _s->engineRunning : 0, _s ? _s->manualMode : 0, _savePending);
+    if (n > 0 && n < (int)sizeof(b)) _emit(b, (uint16_t)n);
+}
+
+static void _machine_cal() {
+    char names[256];
+    strncpy(names, clutch_cal_field_names(), sizeof(names) - 1);
+    names[sizeof(names) - 1] = '\0';
+    for (char *f = strtok(names, " "); f; f = strtok(NULL, " ")) {
+        long v = 0;
+        if (clutch_cal_get(f, &v)) _p("@cal %s=%ld\r\n", f, v);
+    }
+    _p("@end\r\n");
+}
+
+static void _machine(char *line) {
+    char *argv[ARGV_MAX];
+    int argc = _split(line, argv);
+    if (argc == 0) return;
+
+    const char *cmd = argv[0];
+    const char *err = "";
+    long v = 0;
+
+    if (!strcmp(cmd, "live")) { _machine_live(); return; }
+    if (!strcmp(cmd, "cal"))  { _machine_cal();  return; }
+
+    if (!strcmp(cmd, "set")) {
+        if (argc < 3 || !_cal_value(argv[1], argv[2], &v)) { _p("@err usage: set <field> <value>\r\n"); return; }
+        if (clutch_cal_set(argv[1], v, &err)) _p("@ok %s=%ld\r\n", argv[1], v);
+        else                                  _p("@err %s\r\n", err);
+        return;
+    }
+
+    if (!strcmp(cmd, "capture")) {
+        if (argc < 2) { _p("@err usage: capture <field>\r\n"); return; }
+        if (clutch_cal_capture(argv[1], &err) && clutch_cal_get(argv[1], &v)) _p("@ok %s=%ld\r\n", argv[1], v);
+        else                                                                  _p("@err %s\r\n", err);
+        return;
+    }
+
+    if (!strcmp(cmd, "save")) {
+        if (_s && _s->engineRunning) {
+            _savePending = true;
+            _p("@ok save queued until the engine stops\r\n");
+        } else {
+            _savePending = false;
+            _p(clutch_cal_save() ? "@ok saved to flash\r\n" : "@err flash write failed\r\n");
+        }
+        return;
+    }
+
+    if (!strcmp(cmd, "load")) {
+        _p(clutch_cal_load() ? "@ok loaded from flash\r\n" : "@err nothing valid in flash\r\n");
+        return;
+    }
+
+    if (!strcmp(cmd, "defaults")) { clutch_cal_defaults(); _p("@ok factory values loaded, not saved\r\n"); return; }
+
+    _p("@err unknown command\r\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -491,20 +592,27 @@ void serial_cli_tick(const StatusInfo *s) {
             if (c == '\n' && _lastWasCR) { _lastWasCR = false; continue; }  // CRLF: one line, not two
             _lastWasCR = (c == '\r');
             _line[_lineLen] = '\0';
-            _emit("\r\n", 2);
-            if (_lineLen) {
-                _monOn = false;         // any command stops the stream
-                _dispatch(_line);
+            if (_lineLen && _line[0] == '@') {
+                _machine(_line + 1);    // no echo, and it leaves `mon` running
+            } else {
+                _emit("\r\n", 2);
+                if (_lineLen) {
+                    _monOn = false;     // any command stops the stream
+                    _dispatch(_line);
+                }
             }
             _lineLen = 0;
             continue;
         }
         _lastWasCR = false;
-        if (c == 8 || c == 127) { if (_lineLen) { _lineLen--; _emit("\b \b", 3); } continue; }
+        if (c == 8 || c == 127) {
+            if (_lineLen) { _lineLen--; if (_line[0] != '@') _emit("\b \b", 3); }
+            continue;
+        }
         if (c >= ' ' && _lineLen < LINE_MAX - 1) {
             _line[_lineLen++] = (char)c;
             char e = (char)c;
-            _emit(&e, 1);               // local echo: most terminals do not
+            if (_line[0] != '@') _emit(&e, 1);   // local echo: most terminals do not
         }
     }
 

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T89 USB probe</title>
+<style>
+  body { font: 16px/1.4 system-ui, sans-serif; margin: 16px; background: #111; color: #eee; }
+  h1 { font-size: 20px; }
+  table { border-collapse: collapse; margin-bottom: 16px; }
+  td { padding: 4px 12px 4px 0; vertical-align: top; }
+  .yes { color: #6c6; } .no { color: #f66; }
+  button { font-size: 18px; padding: 12px 16px; margin: 0 8px 8px 0; }
+  pre { background: #000; padding: 12px; white-space: pre-wrap; word-break: break-all; min-height: 120px; }
+</style>
+</head>
+<body>
+<h1>T89 USB probe</h1>
+<table id="facts"></table>
+<button id="btnSerial">Try Web Serial</button>
+<button id="btnUsb">Try WebUSB</button>
+<pre id="log"></pre>
+
+<script>
+const BAUD = 115200;
+const COMMAND = 'status\r';
+const READ_MS = 1500;
+
+const logEl = document.getElementById('log');
+function log(s) { logEl.textContent += s + '\n'; }
+
+function fact(name, value, ok) {
+  const row = document.getElementById('facts').insertRow();
+  row.insertCell().textContent = name;
+  const cell = row.insertCell();
+  cell.textContent = value;
+  if (ok !== undefined) cell.className = ok ? 'yes' : 'no';
+}
+
+const hasSerial = 'serial' in navigator;
+const hasUsb = 'usb' in navigator;
+fact('Page loaded from', location.protocol + '//' + (location.host || '(local file)'));
+fact('Secure context', String(window.isSecureContext), window.isSecureContext);
+fact('navigator.serial', hasSerial ? 'present' : 'missing', hasSerial);
+fact('navigator.usb', hasUsb ? 'present' : 'missing', hasUsb);
+fact('User agent', navigator.userAgent);
+
+document.getElementById('btnSerial').disabled = !hasSerial;
+document.getElementById('btnUsb').disabled = !hasUsb;
+
+document.getElementById('btnSerial').onclick = async () => {
+  log('--- Web Serial ---');
+  let port;
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: BAUD });
+    log('Port open.');
+
+    const writer = port.writable.getWriter();
+    await writer.write(new TextEncoder().encode(COMMAND));
+    writer.releaseLock();
+    log('Sent: status');
+
+    const reader = port.readable.getReader();
+    const stop = setTimeout(() => reader.cancel(), READ_MS);
+    const decoder = new TextDecoder();
+    let text = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    clearTimeout(stop);
+    reader.releaseLock();
+    log(text ? 'Reply:\n' + text : 'No reply within ' + READ_MS + ' ms.');
+  } catch (e) {
+    log('FAILED: ' + e.name + ': ' + e.message);
+  } finally {
+    if (port) { try { await port.close(); } catch (e) {} }
+  }
+};
+
+document.getElementById('btnUsb').onclick = async () => {
+  log('--- WebUSB ---');
+  let dev;
+  try {
+    dev = await navigator.usb.requestDevice({ filters: [] });
+    log('Picked: ' + (dev.productName || '(no name)') + '  VID 0x' + dev.vendorId.toString(16) +
+        ' PID 0x' + dev.productId.toString(16));
+    await dev.open();
+    if (!dev.configuration) await dev.selectConfiguration(1);
+
+    let comm = null, data = null;
+    for (const itf of dev.configuration.interfaces) {
+      const alt = itf.alternates[0];
+      log('Interface ' + itf.interfaceNumber + ': class 0x' + alt.interfaceClass.toString(16) +
+          ', endpoints ' + alt.endpoints.map(e => e.direction + ' ' + e.endpointNumber + ' ' + e.type).join(', '));
+      if (alt.interfaceClass === 0x02) comm = itf;
+      if (alt.interfaceClass === 0x0A) data = itf;
+    }
+    if (!data) { log('No CDC data interface (class 0x0A) found.'); return; }
+
+    if (comm) {
+      await dev.claimInterface(comm.interfaceNumber);
+      // CDC SET_CONTROL_LINE_STATE, DTR + RTS asserted
+      await dev.controlTransferOut({ requestType: 'class', recipient: 'interface', request: 0x22,
+                                     value: 0x03, index: comm.interfaceNumber });
+      log('Claimed comm interface, DTR set.');
+    }
+    await dev.claimInterface(data.interfaceNumber);
+    log('Claimed data interface.');
+
+    const eps = data.alternates[0].endpoints;
+    const epOut = eps.find(e => e.direction === 'out' && e.type === 'bulk');
+    const epIn = eps.find(e => e.direction === 'in' && e.type === 'bulk');
+    await dev.transferOut(epOut.endpointNumber, new TextEncoder().encode(COMMAND));
+    log('Sent: status');
+
+    const decoder = new TextDecoder();
+    let text = '';
+    const deadline = Date.now() + READ_MS;
+    while (Date.now() < deadline) {
+      const r = await Promise.race([
+        dev.transferIn(epIn.endpointNumber, 512),
+        new Promise(res => setTimeout(() => res(null), deadline - Date.now()))
+      ]);
+      if (!r) break;
+      text += decoder.decode(r.data, { stream: true });
+    }
+    log(text ? 'Reply:\n' + text : 'No reply within ' + READ_MS + ' ms.');
+  } catch (e) {
+    log('FAILED: ' + e.name + ': ' + e.message);
+  } finally {
+    if (dev && dev.opened) { try { await dev.close(); } catch (e) {} }
+  }
+};
+</script>
+</body>
+</html>

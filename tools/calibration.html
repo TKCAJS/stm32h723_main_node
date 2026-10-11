@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T89 calibration</title>
+<style>
+  :root { --bg:#111; --panel:#1b1b1b; --line:#333; --text:#eee; --dim:#999; --ok:#6c6; --bad:#f66; --accent:#3b82f6; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; background: var(--bg); color: var(--text); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  button, input, select { font: inherit; color: var(--text); background: #262626; border: 1px solid #444; border-radius: 6px; padding: 10px 12px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  input, select { width: 100%; min-width: 0; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #msg { margin-top: 8px; min-height: 1.4em; }
+  #msg.ok { color: var(--ok); } #msg.bad { color: var(--bad); }
+  .live { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .live div { background: #000; border-radius: 6px; padding: 8px; }
+  .live span { display: block; color: var(--dim); font-size: 13px; }
+  .live b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row label small { display: block; color: var(--dim); font-size: 13px; }
+  .row .cap { visibility: hidden; }
+  .row .cap.on { visibility: visible; }
+</style>
+</head>
+<body>
+<h1>T89 main node calibration</h1>
+
+<section>
+  <div class="bar">
+    <button id="connect" class="primary">Connect</button>
+    <span id="link" class="bad">not connected</span>
+  </div>
+  <div id="msg"></div>
+</section>
+
+<section>
+  <h2>Live</h2>
+  <div class="live" id="live"></div>
+</section>
+
+<section>
+  <h2>Settings</h2>
+  <div id="fields"></div>
+</section>
+
+<section>
+  <div class="bar">
+    <button id="save" class="primary" disabled>Save to flash</button>
+    <button id="load" disabled>Reload from flash</button>
+    <button id="defaults" disabled>Factory defaults</button>
+  </div>
+</section>
+
+<script>
+const BAUD = 115200;
+const LIVE_MS = 250;
+const REPLY_MS = 2000;
+const SAVE_REPLY_MS = 5000;     // the flash erase stalls the node for about a second
+
+const CURVES = ['linear', 'log', 'exp', 'smooth', 'power', 'piecewise'];
+const NO_CAPTURE = ['speed', 'curve', 'strength', 'pw_blend'];
+const LABELS = {
+  engaged:         ['Clutch engaged', 'servo counts, paddle idle'],
+  disengaged:      ['Clutch disengaged', 'servo counts, fully pulled'],
+  trigger:         ['Downshift trigger', 'servo counts'],
+  bite:            ['Bite point', 'servo counts'],
+  speed:           ['Move speed', '0 fastest .. 1280 slowest'],
+  paddle_l_idle:   ['Left paddle idle', 'raw hall'],
+  paddle_l_pulled: ['Left paddle pulled', 'raw hall'],
+  paddle_r_idle:   ['Right paddle idle', 'raw hall'],
+  paddle_r_pulled: ['Right paddle pulled', 'raw hall'],
+  curve:           ['Response curve', ''],
+  strength:        ['Curve strength', 'x100, 10..500'],
+  pw_paddle_start: ['Piecewise paddle start', '0..10000 of paddle travel'],
+  pw_paddle_end:   ['Piecewise paddle end', '0..10000 of paddle travel'],
+  pw_clutch_start: ['Piecewise clutch start', '0..10000 of clutch travel'],
+  pw_clutch_end:   ['Piecewise clutch end', '0..10000 of clutch travel'],
+  pw_blend:        ['Piecewise blend', 'paddle units'],
+};
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder();
+
+function say(text, bad) {
+  $('msg').textContent = text;
+  $('msg').className = bad ? 'bad' : 'ok';
+}
+
+// ---------------------------------------------------------------------------
+// Transport: WebUSB on Android, Web Serial elsewhere. Both feed onBytes().
+// ---------------------------------------------------------------------------
+let write = null;       // async (Uint8Array) => void, null when disconnected
+
+async function openUsb() {
+  const dev = await navigator.usb.requestDevice({ filters: [] });
+  await dev.open();
+  if (!dev.configuration) await dev.selectConfiguration(1);
+
+  const find = cls => dev.configuration.interfaces.find(i => i.alternates[0].interfaceClass === cls);
+  const comm = find(0x02), data = find(0x0A);
+  if (!data) throw new Error('not a serial (CDC) device');
+  if (comm) {
+    await dev.claimInterface(comm.interfaceNumber);
+    // CDC SET_CONTROL_LINE_STATE, DTR + RTS asserted
+    await dev.controlTransferOut({ requestType: 'class', recipient: 'interface', request: 0x22,
+                                   value: 0x03, index: comm.interfaceNumber });
+  }
+  await dev.claimInterface(data.interfaceNumber);
+  const eps = data.alternates[0].endpoints;
+  const epOut = eps.find(e => e.direction === 'out' && e.type === 'bulk').endpointNumber;
+  const epIn = eps.find(e => e.direction === 'in' && e.type === 'bulk').endpointNumber;
+
+  write = bytes => dev.transferOut(epOut, bytes);
+  (async () => {
+    try {
+      while (true) {
+        const r = await dev.transferIn(epIn, 512);
+        if (r.data && r.data.byteLength) onBytes(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+      }
+    } catch (e) { onDisconnect(e); }
+  })();
+}
+
+async function openSerial() {
+  const port = await navigator.serial.requestPort();
+  await port.open({ baudRate: BAUD });
+  const writer = port.writable.getWriter();
+  const reader = port.readable.getReader();
+
+  write = bytes => writer.write(bytes);
+  (async () => {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error('port closed');
+        onBytes(value);
+      }
+    } catch (e) { onDisconnect(e); }
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// Protocol: one request at a time; only lines starting with '@' are ours.
+// ---------------------------------------------------------------------------
+const dec = new TextDecoder();
+let rxText = '';
+let pending = null;     // { lines, isLast, resolve, reject, timer }
+let chain = Promise.resolve();
+let busy = 0;
+
+function onBytes(bytes) {
+  rxText += dec.decode(bytes, { stream: true });
+  let nl;
+  while ((nl = rxText.indexOf('\n')) >= 0) {
+    const line = rxText.slice(0, nl).replace(/\r$/, '');
+    rxText = rxText.slice(nl + 1);
+    if (line[0] === '@' && pending) {
+      pending.lines.push(line);
+      if (pending.isLast(line)) {
+        const p = pending;
+        pending = null;
+        clearTimeout(p.timer);
+        p.resolve(p.lines);
+      }
+    }
+  }
+}
+
+function request(cmd, isLast, timeoutMs = REPLY_MS) {
+  busy++;
+  const run = () => new Promise((resolve, reject) => {
+    if (!write) { reject(new Error('not connected')); return; }
+    const p = pending = { lines: [], isLast, resolve, reject };
+    const fail = e => { clearTimeout(p.timer); if (pending === p) pending = null; reject(e); };
+    p.timer = setTimeout(() => fail(new Error('no reply to ' + cmd)), timeoutMs);
+    write(enc.encode(cmd + '\r')).catch(fail);
+  });
+  const result = chain.then(run, run);
+  chain = result.catch(() => {}).then(() => { busy--; });
+  return result;
+}
+
+const isReply = line => line.startsWith('@ok') || line.startsWith('@err');
+
+// For set / capture / save / load / defaults. Resolves with the text after "@ok ".
+async function command(cmd, timeoutMs) {
+  const [line] = await request(cmd, isReply, timeoutMs);
+  if (line.startsWith('@err')) throw new Error(line.slice(5));
+  return line.slice(4);
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+const inputs = {};
+
+function buildField(name, value) {
+  const [title, hint] = LABELS[name] || [name, ''];
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const label = document.createElement('label');
+  label.textContent = title;
+  const small = document.createElement('small');
+  small.textContent = hint ? name + ' — ' + hint : name;
+  label.appendChild(small);
+
+  let input;
+  if (name === 'curve') {
+    input = document.createElement('select');
+    CURVES.forEach((c, i) => input.add(new Option(c, i)));
+  } else {
+    input = document.createElement('input');
+    input.type = 'number';
+    input.inputMode = 'numeric';
+  }
+  input.value = value;
+  input.onchange = () => setField(name, input.value);
+
+  const cap = document.createElement('button');
+  cap.textContent = 'Capture';
+  cap.className = NO_CAPTURE.includes(name) ? 'cap' : 'cap on';
+  cap.onclick = () => captureField(name);
+
+  row.append(label, input, cap);
+  $('fields').appendChild(row);
+  inputs[name] = input;
+}
+
+async function loadCal() {
+  const lines = await request('@cal', line => line === '@end');
+  for (const line of lines) {
+    const m = /^@cal (\w+)=(-?\d+)$/.exec(line);
+    if (!m) continue;
+    if (inputs[m[1]]) inputs[m[1]].value = m[2];
+    else buildField(m[1], m[2]);
+  }
+}
+
+function applyOk(reply) {
+  const m = /^(\w+)=(-?\d+)$/.exec(reply);
+  if (m && inputs[m[1]]) inputs[m[1]].value = m[2];
+}
+
+async function setField(name, value) {
+  try {
+    applyOk(await command('@set ' + name + ' ' + value));
+    say(name + ' set to ' + value + ' (not saved yet)');
+  } catch (e) {
+    say(name + ' rejected: ' + e.message, true);
+    loadCal().catch(() => {});      // put the real value back in the box
+  }
+}
+
+async function captureField(name) {
+  try {
+    const reply = await command('@capture ' + name);
+    applyOk(reply);
+    say('captured ' + reply + ' (not saved yet)');
+  } catch (e) {
+    say(name + ' not captured: ' + e.message, true);
+  }
+}
+
+async function calAction(cmd, timeoutMs) {
+  try {
+    say(await command(cmd, timeoutMs));
+    await loadCal();
+  } catch (e) {
+    say(e.message, true);
+  }
+}
+
+$('save').onclick = () => calAction('@save', SAVE_REPLY_MS);
+$('load').onclick = () => calAction('@load');
+$('defaults').onclick = () => { if (confirm('Load factory values? Nothing is written to flash until you save.')) calAction('@defaults'); };
+
+// ---------------------------------------------------------------------------
+// Live readouts
+// ---------------------------------------------------------------------------
+const LIVE = [
+  ['Left hall',      v => v.hl],
+  ['Right hall',     v => v.hr],
+  ['Paddle',         v => (v.pad / 100).toFixed(1) + ' %'],
+  ['Paddle target',  v => v.tgt],
+  ['Clutch position', v => v.fb ? v.clu + ' (' + v.pull + ' %)' : 'STALE', v => v.fb],
+  ['Clutch commanded', v => v.cmd],
+  ['Clutch state',   v => !v.fb ? 'no feedback' : v.dis ? 'disengaged' : v.bite ? 'bite window' : 'engaged', v => v.fb],
+  ['Clutch control', v => v.ovr ? 'console' : 'paddle'],
+  ['Gear',           v => v.gv ? v.gear : v.gear + ' (stale)'],
+  ['RPM',            v => v.rpm],
+  ['Engine',         v => v.eng ? 'RUNNING' : 'stopped'],
+  ['Mode',           v => v.man ? 'MANUAL' : 'AUTO'],
+  ['Flash save',     v => v.sp ? 'queued' : 'idle'],
+];
+const liveCells = LIVE.map(([title]) => {
+  const div = document.createElement('div');
+  const span = document.createElement('span');
+  span.textContent = title;
+  const b = document.createElement('b');
+  b.textContent = '—';
+  div.append(span, b);
+  $('live').appendChild(div);
+  return b;
+});
+
+async function pollLive() {
+  if (!write || busy) return;       // never queue behind a user action
+  try {
+    const [line] = await request('@live', l => l.startsWith('@live'));
+    const v = {};
+    for (const kv of line.split(' ').slice(1)) {
+      const [k, n] = kv.split('=');
+      v[k] = Number(n);
+    }
+    LIVE.forEach(([, text, good], i) => {
+      liveCells[i].textContent = text(v);
+      liveCells[i].className = good ? (good(v) ? 'ok' : 'bad') : '';
+    });
+  } catch (e) { /* a missed poll is not worth a message; the next one retries */ }
+}
+setInterval(pollLive, LIVE_MS);
+
+// ---------------------------------------------------------------------------
+// Connection
+// ---------------------------------------------------------------------------
+function setConnected(on) {
+  $('link').textContent = on ? 'connected' : 'not connected';
+  $('link').className = on ? 'ok' : 'bad';
+  $('connect').disabled = on;
+  for (const id of ['save', 'load', 'defaults']) $(id).disabled = !on;
+}
+
+function onDisconnect(e) {
+  if (!write) return;
+  write = null;
+  setConnected(false);
+  say('disconnected: ' + e.message, true);
+}
+
+$('connect').onclick = async () => {
+  const android = /Android/.test(navigator.userAgent);
+  const useUsb = 'usb' in navigator && (android || !('serial' in navigator));
+  try {
+    if (useUsb) await openUsb();
+    else if ('serial' in navigator) await openSerial();
+    else throw new Error('this browser has neither WebUSB nor Web Serial — use Chrome');
+    setConnected(true);
+    await loadCal();
+    say('connected over ' + (useUsb ? 'WebUSB' : 'Web Serial'));
+  } catch (e) {
+    say('connect failed: ' + e.message, true);
+  }
+};
+</script>
+</body>
+</html>

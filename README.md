@@ -185,12 +185,30 @@ reconfigures whatever it finds there. Analog goes through `hall_adc.h`.
 ## Calibration UI
 
 No radio here, so this node cannot serve the pages. The driving requirement is the pit
-lane: an Android tablet, no internet. That rules out more than it first appears —
-**Chrome on Android has no Web Serial API at all** (desktop and ChromeOS only), and
-`file://` is not a secure context, so an HTML file opened off an SD card cannot reach USB
-either. Any answer that ends in "the tablet talks to the node over USB" is dead.
+lane: an Android tablet, no internet.
 
-**Primary path — the display node already does this.** `P4Display_node`'s `PitServer.cpp`
+**Built — a page over USB.** `tools/calibration.html` is one self-contained file: copy
+it to the tablet or laptop and open it in Chrome straight from the file system. It
+shows the live readouts and edits, captures, saves and reloads every calibration field.
+
+- On Android it uses **WebUSB**. Checked on a Lenovo M10 with Chrome 154: a page opened
+  from a file is a secure context, and WebUSB claims the node's CDC interface and
+  exchanges data both ways. Tablet in USB host mode (OTG cable), node as the device.
+- On a desktop it uses **Web Serial**, because the OS serial driver owns the port there
+  and WebUSB cannot claim it.
+- `tools/usb_probe.html` is the check to run first on a new tablet: it reports what the
+  browser offers and tries each route.
+
+The page talks to the console's machine protocol — lines starting with `@`, described
+at the top of that section in `src/serial_cli.cpp`. Requests are not echoed and every
+reply line starts with `@`, so it shares the port with the typed commands below and
+goes through the same validation.
+
+The node is bike-powered, so the connection is data-only: nothing should draw from the
+tablet's VBUS or feed back into it. VBUS sensing is off in this build, which is what
+makes that wiring legal.
+
+**Planned — through the display node.** `P4Display_node`'s `PitServer.cpp`
 serves `VIEWER_HTML` from PROGMEM over the SoftAP the C6 brings up. The calibration pages
 belong there, next to the viewer page, with the dash proxying get/set to this node over
 CAN. Tablet joins the AP, browses to the dash. No internet, no USB, works on Android.
@@ -205,29 +223,13 @@ Two rules for that channel:
 - Values live in this node's own flash. The dash is an editor, never the source of truth —
   the node must run standalone with the dash unplugged.
 
-**Secondary path — laptop on the bench.** The same page over Web Serial on USB CDC, no
-dash involved. Convenient for deep bring-up work, but it is the desktop-only path.
+None of that is written yet: the message type is reserved in `can_ids.h` and nothing
+handles it.
 
-**Plugging an Android device straight into this node** works, but not through a
-browser — there is no Web Serial on Android to reach the port with. Phone in USB host
-mode (OTG), node as the CDC device, and either:
+**A terminal app also works** (e.g. Kai Morich's *Serial USB Terminal* on Android),
+115200 8N1, **local echo off** — the node echoes. Every typed command below.
 
-- **a terminal app** (e.g. Kai Morich's *Serial USB Terminal*), 115200 8N1, **local
-  echo off** — the node echoes. Every command above, nothing to write. This is the
-  bench answer;
-- **a small native app** — `usb-serial-for-android` for the port, a WebView loading the
-  calibration page out of assets, bridged with `addJavascriptInterface`. That is the
-  only way to get the *page* onto an Android screen over USB, and it is an app to
-  write, not a URL to open.
-
-Either way the node is bike-powered, so the connection is data-only: nothing should
-draw from the phone's VBUS or feed back into it. VBUS sensing is off in this build,
-which is what makes that wiring legal.
-
-For the pit lane the dash path above is still the answer. USB to a handset is a bench
-convenience, not a trackside plan — it needs a cable, a dongle and a spare hand.
-
-**Always available, and now built.** A plain text command set on the serial port —
+**Always available.** A plain text command set on the serial port —
 `src/serial_cli.cpp`. This is the web interface's replacement, not a stopgap: there is
 no server on this node and there never will be, so every knob `WebInterface.h` had is
 here, plus the sniffer's bench controls, because settling the servo protocol has to
