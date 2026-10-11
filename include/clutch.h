@@ -78,5 +78,5 @@ bool clutch_cal_set(const char *field, long value, const char **err);
 bool clutch_cal_capture(const char *field, const char **err);
 
 void clutch_cal_defaults();
-bool clutch_cal_save();     // BLOCKS on a flash erase — engine stopped only, see cal_store.h
+bool clutch_cal_save();     // BLOCKS on a flash erase — deferred while the engine runs, see cal_store.h
 bool clutch_cal_load();

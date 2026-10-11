@@ -24,8 +24,9 @@
 // counted — a console is never allowed to stall the shift path, and a
 // half-written line is worse than a missing one.
 //
-// Every command that MOVES something or CHANGES something is refused while
-// the engine is running. Nobody re-times a clutch from a terminal mid-session.
+// Clutch moves and calibration edits work with the engine running — bite points
+// are found that way. Only `cal save` waits: it stalls the core for the flash
+// erase, so with the engine running it is queued until the engine stops.
 
 void serial_cli_init();
 

@@ -33,16 +33,17 @@
 // Here it should sit in the low hundreds of microseconds and stay there.
 //
 // One legitimate exception: `cal save` erases a flash sector and stalls the
-// core for the best part of a second. It is reachable only with the engine
-// stopped, and it will leave a mark here — that mark is expected.
+// core for the best part of a second. It only ever runs with the engine
+// stopped (queued until then), and it will leave a mark here — that mark is expected.
 static uint32_t _maxLoopUs  = 0;
 static uint32_t _loopStalls = 0;
 #define LOOP_STALL_US 20000
 
-// At or above this the engine counts as running, and every settings write —
-// above all `cal save`, which stalls the core — is refused. Below cranking
-// speed, so a stalled-but-turning engine still counts as stopped. Until the
-// RPM counter is wired rpm reads 0, so writes are always allowed on the bench.
+// At or above this the engine counts as running, and `cal save` — which stalls
+// the core for the flash erase — is deferred until it stops. Calibration itself
+// (capture, set, jogging the clutch) works with the engine running; that is
+// how a bite point is found. Until the RPM counter is wired rpm reads 0, so a
+// save always goes straight through on the bench.
 #define ENGINE_RUNNING_RPM  500
 
 static uint32_t _upCount = 0, _downCount = 0, _neutralCount = 0, _markCount = 0;

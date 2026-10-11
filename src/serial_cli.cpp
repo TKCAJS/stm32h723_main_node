@@ -33,6 +33,7 @@ static bool     _monOn   = false;
 static uint16_t _monMs   = 250;
 static uint32_t _monLast = 0;
 static bool     _traceOn = false;
+static bool     _savePending = false;   // `cal save` asked for with the engine running
 static uint32_t _traceSeq = 0;
 
 // ---------------------------------------------------------------------------
@@ -105,8 +106,8 @@ static void _print_status() {
 
     _p("\r\n-- node ------------------------------------\r\n");
     if (_s) {
-        _p("engine       %s  (settings %s)\r\n", _s->engineRunning ? "RUNNING" : "stopped",
-           _s->engineRunning ? "read-only" : "writable");
+        _p("engine       %s%s\r\n", _s->engineRunning ? "RUNNING" : "stopped",
+           _savePending ? "   (cal save queued)" : "");
         _p("mode         %s\r\n", _s->manualMode ? "MANUAL" : "AUTO");
         _p("gear         %u %s   rpm %u\r\n", _s->gear, _s->gearValid ? "" : "(stale)", _s->rpm);
         _p("hall         L %u  R %u\r\n", _s->hallLeft, _s->hallRight);
@@ -188,16 +189,16 @@ static void _print_help() {
        "endian be|le        16-bit word order (bring-up step 3)\r\n"
        "readid|readpid|readcfg   one-shot reads\r\n"
        "clear               zero counters and latency\r\n");
-    _puts("-- clutch (engine stopped) ----------------\r\n"
+    _puts("-- clutch ---------------------------------\r\n"
        "pos <counts> [spd]  command an absolute servo position\r\n"
        "nudge <+/-delta>    move relative to the last command\r\n"
        "pull <percent>      command by calibrated travel, 0=engaged 100=disengaged\r\n"
        "release             command the engaged limit\r\n"
-       "-- calibration (engine stopped) -----------\r\n"
+       "-- calibration ----------------------------\r\n"
        "cal                 show it\r\n"
        "cal capture <field> name the CURRENT position: engaged|disengaged|trigger|bite\r\n"
        "cal set <field> <v> engaged|disengaged|trigger|bite|speed\r\n"
-       "cal save            write to flash (STALLS the node ~1 s)\r\n"
+       "cal save            write to flash; queued until the engine stops\r\n"
        "cal load|defaults   re-read flash / factory values\r\n"
        "\r\nDestructive servo commands (save centre, set id, set bitrate,\r\n"
        "factory reset) are deliberately unreachable from here.\r\n");
@@ -212,22 +213,22 @@ static void _print_cal() {
     _p("speed       %5u   (0 fastest .. 1280 slowest)\r\n", c->moveSpeed);
     _p("live        %5u   feedback %s\r\n", clutch_position(),
        clutch_feedback_ok() ? "fresh" : "STALE");
-    _p("stored at   0x%08lX\r\n", (unsigned long)cal_store_base());
+    _p("stored at   0x%08lX%s\r\n", (unsigned long)cal_store_base(),
+       _savePending ? "   (save queued until engine stops)" : "");
 }
 
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
-// Every write path comes through here. The rule is the README's: the tablet
-// (and now the terminal) may look at any time, but may only change things with
-// the engine stopped.
-static bool _mayWrite() {
-    if (_s && _s->engineRunning) {
-        _p("refused: engine running. Stop the engine first.\r\n");
-        return false;
-    }
-    return true;
+// Moving the clutch and editing calibration are RAM-only and never block, so
+// they work with the engine running — that is how a bite point is found. The
+// one thing that waits is the flash write: `cal save` stalls the core for the
+// best part of a second (cal_store.h), so with the engine running it is queued
+// and done the moment the engine stops.
+static void _save_now() {
+    _savePending = false;
+    _p(clutch_cal_save() ? "saved to flash\r\n" : "SAVE FAILED — flash unchanged or erased\r\n");
 }
 
 static bool _num(const char *tok, long *out) {
@@ -320,7 +321,6 @@ static void _dispatch(char *line) {
     if (!strcmp(cmd, "clear"))   { servo_clear_counters(); _outDropped = 0; _p("counters cleared\r\n"); return; }
 
     if (!strcmp(cmd, "pos")) {
-        if (!_mayWrite()) return;
         if (!_num(argv[1], &n) || n < 0 || n > asmg::kPositionMax) {
             _p("usage: pos <0..%u> [speed]\r\n", (unsigned)asmg::kPositionMax);
             return;
@@ -336,7 +336,6 @@ static void _dispatch(char *line) {
     }
 
     if (!strcmp(cmd, "nudge")) {
-        if (!_mayWrite()) return;
         if (!_num(argv[1], &n)) { _p("usage: nudge <+/-delta>\r\n"); return; }
         long t = (long)clutch_commanded() + n;
         if (t < 0) t = 0;
@@ -347,7 +346,6 @@ static void _dispatch(char *line) {
     }
 
     if (!strcmp(cmd, "pull")) {
-        if (!_mayWrite()) return;
         if (!_num(argv[1], &n) || n < 0 || n > 100) { _p("usage: pull <0..100>\r\n"); return; }
         clutch_command_pull((float)n / 100.0f);
         _p("pull %ld%% -> %u counts\r\n", n, clutch_commanded());
@@ -355,7 +353,6 @@ static void _dispatch(char *line) {
     }
 
     if (!strcmp(cmd, "release")) {
-        if (!_mayWrite()) return;
         clutch_release();
         _p("release -> %u counts\r\n", clutch_commanded());
         return;
@@ -364,21 +361,24 @@ static void _dispatch(char *line) {
     if (!strcmp(cmd, "cal")) {
         if (argc == 1) { _print_cal(); return; }
 
-        if (!_mayWrite()) return;
-
         const char *err = "";
         if (!strcmp(argv[1], "load")) {
-            // Swapping the live calibration is a change like any other, even
-            // though the numbers come off this node's own flash.
             _p(clutch_cal_load() ? "loaded from flash\r\n"
                                  : "nothing valid in flash — calibration unchanged\r\n");
             return;
         }
         if (!strcmp(argv[1], "defaults")) { clutch_cal_defaults(); _p("factory values loaded (not saved)\r\n"); return; }
         if (!strcmp(argv[1], "save")) {
-            // Stalls the node for the erase — see cal_store.h. Only reachable
-            // here, and only with the engine stopped.
-            _p(clutch_cal_save() ? "saved to flash\r\n" : "SAVE FAILED — flash unchanged or erased\r\n");
+            // Stalls the node for the erase — see cal_store.h. Never with the
+            // engine running: queued instead, and written from serial_cli_tick()
+            // once it stops. What gets written is the calibration as it is THEN,
+            // so tweaks made after queuing are kept.
+            if (_s && _s->engineRunning) {
+                _savePending = true;
+                _p("save queued: writes to flash when the engine stops\r\n");
+            } else {
+                _save_now();
+            }
             return;
         }
         if (!strcmp(argv[1], "capture")) {
@@ -439,6 +439,8 @@ void serial_cli_tick(const StatusInfo *s) {
             _emit(&e, 1);               // local echo: most terminals do not
         }
     }
+
+    if (_savePending && _s && !_s->engineRunning) _save_now();
 
     if (_traceOn) _print_trace();
 
