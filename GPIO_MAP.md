@@ -4,21 +4,25 @@ Assigned pins, from `include/pins.h` — that file is the source of truth; this 
 quick-reference copy of it. If the two disagree, `pins.h` wins. For what each pin
 connects to and the parts it needs, see `WIRING.md`.
 
+**Bold** = actually needs external wiring on this build. Everything else is either
+already on the board (LCD, SD slot, USB-C, onboard button) or not wired yet
+(diagnostic encoder — no driver touches it in `src/` yet, fallback UART).
+
 | Pin | Function |
 |---|---|
-| PD0 | FDCAN1_RX (main bus) |
-| PD1 | FDCAN1_TX (main bus) |
-| PB12 | FDCAN2_RX (servo bus) |
-| PB13 | FDCAN2_TX (servo bus) |
-| PA2 | HALL_LEFT (ADC12_INP14) |
-| PA3 | HALL_RIGHT (ADC12_INP15) |
-| PA0 | RPM_IN (TIM2_CH1/ETR) — also the variant's default UART4 TX, see note |
-| PC6 | MATRIX_DATA (NeoMatrix, TIM8_CH1) |
-| PB4 | SHIFT_UP (EXTI4) |
-| PB5 | SHIFT_DOWN (EXTI5) |
-| PB6 | NEUTRAL (EXTI6) |
-| PB7 | MANUAL_MODE (EXTI7) |
-| PB8 | LOG_MARK (EXTI8) |
+| **PD0** | **FDCAN1_RX (main bus)** |
+| **PD1** | **FDCAN1_TX (main bus)** |
+| **PB12** | **FDCAN2_RX (servo bus)** |
+| **PB13** | **FDCAN2_TX (servo bus)** |
+| **PA2** | **HALL_LEFT (ADC12_INP14)** |
+| **PA3** | **HALL_RIGHT (ADC12_INP15)** |
+| **PA0** | **RPM_IN (TIM2_CH1/ETR)** — also the variant's default UART4 TX, see note |
+| **PC6** | **MATRIX_DATA (NeoMatrix, TIM8_CH1)** |
+| **PB4** | **SHIFT_UP (EXTI4)** |
+| **PB5** | **SHIFT_DOWN (EXTI5)** |
+| **PB6** | **NEUTRAL (EXTI6)** |
+| **PB7** | **MANUAL_MODE (EXTI7)** |
+| **PB8** | **LOG_MARK (EXTI8)** |
 | PE0 | ENC_CLK (EXTI0) |
 | PE1 | ENC_DT (EXTI1) |
 | PE2 | ENC_SW (EXTI2) |
